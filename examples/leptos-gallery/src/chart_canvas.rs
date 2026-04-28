@@ -1,17 +1,15 @@
-//! Reusable canvas component that bridges Leptos → wgpu renderer.
+//! Gallery canvas wrapper.
 //!
-//! Takes a builder closure `(Workspace) -> Chart` and renders it once on mount.
-//! Browser-visible overlays are delegated to small modules so this component
-//! stays focused on renderer lifecycle and top-level interaction routing.
+//! Composes [`berthacharts_leptos::mount_renderer`] with the gallery's
+//! overlay UI: guides, tooltip, and the annotation editor. Keeps the
+//! reusable renderer-mount logic in the binding crate while the rich
+//! interaction layer stays application-side.
 
 use std::sync::Arc;
 
-use berthacharts_core::{Chart, Workspace};
-#[cfg(target_arch = "wasm32")]
-use berthacharts_renderer_wgpu::Renderer;
+use berthacharts_core::Workspace;
+use berthacharts_leptos::{browser_device_pixel_ratio, mount_renderer, physical_px};
 use leptos::prelude::*;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
 
 use crate::annotation_layer::{
     chart_snap_targets, AnnotationLayer, AnnotationState, AnnotationToolbar,
@@ -19,11 +17,13 @@ use crate::annotation_layer::{
 use crate::dom_events::{event_offset_in_current_target, event_target_has_class};
 use crate::guide_overlay::{render_guides_html, render_tooltip_html};
 
-/// Builder type: takes the workspace and returns a fully-populated [`Chart`].
-pub type BuildChart = Arc<dyn Fn(Arc<Workspace>) -> Chart + Send + Sync + 'static>;
+// Re-export so the existing `use crate::chart_canvas::BuildChart` paths in
+// the gallery example modules keep working.
+pub use berthacharts_leptos::BuildChart;
 
 /// A `<canvas>` of given pixel size that renders the chart produced by `builder`
-/// as soon as the element is mounted.
+/// as soon as the element is mounted, plus the gallery's guide / tooltip /
+/// annotation overlays.
 #[component]
 pub fn ChartCanvas(
     width: u32,
@@ -49,41 +49,14 @@ pub fn ChartCanvas(
     let draw_enabled = annotations.draw_enabled();
     let snap_targets_layer = snap_targets.clone();
 
-    Effect::new(move |_| {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // `.get()` on a typed NodeRef already yields `web_sys::HtmlCanvasElement`
-            // in Leptos 0.7 when the element type is `html::Canvas`.
-            let Some(canvas) = canvas_ref.get() else {
-                return;
-            };
-            let builder = builder.clone();
-            spawn_local(async move {
-                match Renderer::new_for_canvas_with_logical(
-                    canvas,
-                    physical_width,
-                    physical_height,
-                    width as f32,
-                    height as f32,
-                )
-                .await
-                {
-                    Ok(mut renderer) => {
-                        let workspace = Workspace::new();
-                        let chart = builder(workspace);
-                        if let Err(e) = renderer.render(&chart) {
-                            log::error!("render failed: {e}");
-                        }
-                        // Keep the renderer alive for the lifetime of the page.
-                        // A follow-up component will store it in a reactive cell
-                        // so signal changes can drive redraws.
-                        std::mem::forget(renderer);
-                    }
-                    Err(e) => log::error!("renderer init failed: {e}"),
-                }
-            });
-        }
-    });
+    mount_renderer(
+        canvas_ref,
+        width,
+        height,
+        physical_width,
+        physical_height,
+        builder,
+    );
 
     Effect::new(move |_| {
         if draw_enabled.get() {
@@ -145,16 +118,4 @@ pub fn ChartCanvas(
             <div class="guide-flow guide-flow-bottom" inner_html=guide_flow_bottom></div>
         </div>
     }
-}
-
-fn browser_device_pixel_ratio() -> f32 {
-    let device_pixel_ratio = web_sys::window()
-        .map(|window| window.device_pixel_ratio() as f32)
-        .unwrap_or(1.0);
-
-    device_pixel_ratio.max(2.0).clamp(1.0, 3.0)
-}
-
-fn physical_px(logical: u32, device_pixel_ratio: f32) -> u32 {
-    ((logical as f32) * device_pixel_ratio).round().max(1.0) as u32
 }

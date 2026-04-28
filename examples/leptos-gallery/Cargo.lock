@@ -153,11 +153,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "berthacharts-leptos"
+version = "0.0.1"
+dependencies = [
+ "berthacharts-core",
+ "berthacharts-renderer-wgpu",
+ "leptos",
+ "log",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "berthacharts-leptos-gallery"
 version = "0.0.1"
 dependencies = [
  "berthacharts-charts",
  "berthacharts-core",
+ "berthacharts-leptos",
  "berthacharts-network",
  "berthacharts-renderer-wgpu",
  "console_error_panic_hook",

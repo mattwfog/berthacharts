@@ -20,6 +20,7 @@ berthacharts-core          = { path = "../../crates/core" }
 berthacharts-charts        = { path = "../../crates/charts" }
 berthacharts-network       = { path = "../../crates/network" }
 berthacharts-renderer-wgpu = { path = "../../crates/renderer-wgpu" }
+berthacharts-leptos        = { path = "../../crates/leptos" }
 
 leptos = { version = "0.7", features = ["csr"] }
 

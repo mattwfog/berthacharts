@@ -11,3 +11,9 @@ rust-version.workspace = true
 [dependencies]
 berthacharts-core.workspace = true
 berthacharts-renderer-wgpu.workspace = true
+leptos = { version = "0.7", features = ["csr"] }
+log = "0.4"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+web-sys = { workspace = true, features = ["Window"] }
