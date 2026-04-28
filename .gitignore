@@ -4,6 +4,8 @@
 Cargo.lock.bak
 .DS_Store
 node_modules/
-dist/
+# Trunk output for the leptos gallery (and any future example).
+# Scoped to examples/ so crates named `dist` aren't excluded.
+examples/*/dist/
 pkg/
 *.log
