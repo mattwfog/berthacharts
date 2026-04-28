@@ -1,0 +1,12 @@
+[package]
+name = "berthacharts-anno"
+description = "Annotation primitives (reference lines, bands, stat brackets, callouts) for Bertha Charts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+berthacharts-core.workspace = true

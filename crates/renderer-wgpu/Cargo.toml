@@ -1,0 +1,20 @@
+[package]
+name = "berthacharts-renderer-wgpu"
+description = "wgpu-based renderer for Bertha Charts — WebGL2 on the web, native elsewhere."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+berthacharts-core.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+# `webgl` enables the WebGL2 backend on wasm32 — no-op on native targets.
+wgpu = { workspace = true, features = ["webgl"] }
+pollster.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true, features = ["HtmlCanvasElement", "OffscreenCanvas"] }

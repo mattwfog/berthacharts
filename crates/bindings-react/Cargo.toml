@@ -1,0 +1,24 @@
+[package]
+name = "berthacharts-bindings-react"
+description = "React / WASM bindings for Bertha Charts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+berthacharts-core.workspace = true
+berthacharts-renderer-wgpu.workspace = true
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = [
+    "HtmlCanvasElement",
+    "Window",
+    "Document",
+    "Element",
+] }

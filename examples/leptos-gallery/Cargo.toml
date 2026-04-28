@@ -1,0 +1,47 @@
+[package]
+name = "berthacharts-leptos-gallery"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Reference Leptos + WASM gallery for Bertha Charts — a living document."
+
+# Deliberately NOT a member of the main workspace. This keeps WASM-specific
+# dependencies (leptos / wasm-bindgen / web-sys) out of the core workspace's
+# `cargo check` graph. Run this project directly:
+#
+#     cd examples/leptos-gallery
+#     trunk serve
+
+[workspace]
+
+[dependencies]
+# Path deps back to the root workspace. `../..` resolves to the project root.
+berthacharts-core          = { path = "../../crates/core" }
+berthacharts-charts        = { path = "../../crates/charts" }
+berthacharts-network       = { path = "../../crates/network" }
+berthacharts-renderer-wgpu = { path = "../../crates/renderer-wgpu" }
+
+leptos = { version = "0.7", features = ["csr"] }
+
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "DomRect",
+    "Element",
+    "HtmlCanvasElement",
+    "HtmlInputElement",
+    "Window",
+] }
+console_error_panic_hook = "0.1"
+log = "0.4"
+console_log = "1.0"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+# Keep debug builds fast — WASM dev loop favors iteration over symbol richness.
+opt-level = 1

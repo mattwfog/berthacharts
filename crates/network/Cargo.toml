@@ -1,0 +1,13 @@
+[package]
+name = "berthacharts-network"
+description = "Network marks and layouts (force-directed, sankey, chord, arc, hierarchical) for Bertha Charts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+berthacharts-core.workspace = true
+ahash.workspace = true

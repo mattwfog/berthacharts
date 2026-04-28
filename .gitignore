@@ -1,0 +1,9 @@
+/target
+**/target
+**/*.rs.bk
+Cargo.lock.bak
+.DS_Store
+node_modules/
+dist/
+pkg/
+*.log

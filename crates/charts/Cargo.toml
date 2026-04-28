@@ -1,0 +1,13 @@
+[package]
+name = "berthacharts-charts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+description = "Reusable chart specifications for Bertha Charts."
+
+[dependencies]
+berthacharts-core = { workspace = true }

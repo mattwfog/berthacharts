@@ -1,0 +1,31 @@
+[package]
+name = "berthacharts-core"
+description = "Foundational kernel for Bertha Charts: scales, coord systems, scene graph, transform DAG."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+
+[dependencies]
+ahash.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+glam.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+# Derive serde impls on public value types. Does not affect the traits.
+serde = ["dep:serde"]
+
+[lints.rust]
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+# Default clippy level. Pedantic is opt-in per file when warranted; enforcing
+# it workspace-wide trades signal for noise at this stage.
+all = { level = "warn", priority = -1 }

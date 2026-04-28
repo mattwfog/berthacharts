@@ -1,0 +1,15 @@
+[package]
+name = "berthacharts-transforms"
+description = "Fundamental data transforms (filter, bin, aggregate, stack, sort, group, window) for Bertha Charts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+berthacharts-core.workspace = true
+ahash.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true

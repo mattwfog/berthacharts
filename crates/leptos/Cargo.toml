@@ -1,0 +1,13 @@
+[package]
+name = "berthacharts-leptos"
+description = "Leptos bindings for Bertha Charts — signal-native, zero JS runtime."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+berthacharts-core.workspace = true
+berthacharts-renderer-wgpu.workspace = true

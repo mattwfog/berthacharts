@@ -1,0 +1,19 @@
+[build]
+target = "index.html"
+# Output to `dist/` relative to this Trunk.toml.
+dist = "dist"
+# Inline the WASM as base64 during dev for fewer HTTP requests.
+# Flip to `false` for production deploys if you want long-cacheable assets.
+release = false
+
+[serve]
+address = "127.0.0.1"
+port = 8787
+open = false
+no_autoreload = false
+
+# Instruct wasm-bindgen to target `web` (ES module).
+[[hooks]]
+stage = "build"
+command = "sh"
+command_arguments = ["-c", "echo 'build complete'"]
