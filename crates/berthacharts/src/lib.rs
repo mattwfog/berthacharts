@@ -1,0 +1,187 @@
+//! User-facing entry point for Bertha Charts.
+//!
+//! This crate is a facade over the smaller workspace crates. Use it when you
+//! want a stable import path for application code:
+//!
+//! ```
+//! use berthacharts::prelude::*;
+//!
+//! let spec = BarChartSpec::new(vec![
+//!     BarDatum::new("Q1", 42.0),
+//!     BarDatum::new("Q2", 57.0),
+//! ]);
+//! let chart = spec.build(ChartSize::new(640, 360));
+//! assert!(chart.is_ok());
+//! ```
+//!
+//! Advanced users can still depend on the leaf crates directly.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+use std::sync::Arc;
+
+/// Core chart kernel: scales, coordinates, datasets, scenes, guides, and
+/// interaction primitives.
+pub mod core {
+    pub use berthacharts_core::*;
+}
+
+/// Reusable first-party chart specifications.
+#[cfg(feature = "charts")]
+pub mod charts {
+    pub use berthacharts_charts::*;
+}
+
+/// Data transforms that implement the core transform trait.
+#[cfg(feature = "transforms")]
+pub mod transforms {
+    pub use berthacharts_transforms::*;
+}
+
+/// Statistical models and transforms.
+#[cfg(feature = "stats")]
+pub mod stats {
+    pub use berthacharts_stats::*;
+}
+
+/// Distribution chart marks and transforms.
+#[cfg(feature = "distribution")]
+pub mod distribution {
+    pub use berthacharts_dist::*;
+}
+
+/// Finance-specific helpers and chart primitives.
+#[cfg(feature = "finance")]
+pub mod finance {
+    pub use berthacharts_finance::*;
+}
+
+/// Geospatial charts, maps, projections, and GeoJSON helpers.
+#[cfg(feature = "geo")]
+pub mod geo {
+    pub use berthacharts_geo::*;
+}
+
+/// Network and hierarchy chart specifications.
+#[cfg(feature = "network")]
+pub mod network {
+    pub use berthacharts_network::*;
+}
+
+/// Annotation helpers.
+#[cfg(feature = "annotations")]
+pub mod annotations {
+    pub use berthacharts_anno::*;
+}
+
+/// wgpu renderer backend.
+#[cfg(feature = "renderer-wgpu")]
+pub mod renderer_wgpu {
+    pub use berthacharts_renderer_wgpu::*;
+}
+
+/// Leptos bindings.
+#[cfg(feature = "leptos")]
+pub mod leptos {
+    pub use berthacharts_leptos::*;
+}
+
+/// React/WASM bindings.
+#[cfg(feature = "react")]
+pub mod react {
+    pub use berthacharts_bindings_react::*;
+}
+
+/// Convenience methods for any [`ChartSpec`].
+///
+/// Import this trait, or use [`prelude`], to build a chart without manually
+/// creating a [`Workspace`] first.
+pub trait ChartSpecExt: ChartSpec {
+    /// Build this spec in a fresh workspace.
+    fn build(&self, size: ChartSize) -> Result<Chart, Self::Error> {
+        self.build_in(Workspace::new(), size)
+    }
+
+    /// Build this spec in an existing workspace.
+    fn build_in(&self, workspace: Arc<Workspace>, size: ChartSize) -> Result<Chart, Self::Error> {
+        self.build_chart(workspace, size)
+    }
+}
+
+impl<T> ChartSpecExt for T where T: ChartSpec + ?Sized {}
+
+/// Common imports for application code.
+pub mod prelude {
+    pub use crate::core::{
+        Chart, ChartError, ChartSize, ChartSpec, Dataset, DatasetId, Guide, Mark, Rect, Scene,
+        Viewport, Workspace,
+    };
+    pub use crate::ChartSpecExt;
+
+    #[cfg(feature = "charts")]
+    pub use crate::charts::{
+        BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, HeatmapCell,
+        HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError,
+        LineChartOptions, LineChartSpec, LineChartSummary, LineDatum, ScatterDatum,
+        ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary,
+    };
+
+    #[cfg(feature = "transforms")]
+    pub use crate::transforms::{AggOp, Aggregate, Bin, FilterRange, Stack};
+
+    #[cfg(feature = "geo")]
+    pub use crate::geo::{
+        GeoFeature, GeoGeometry, GeoJsonError, GeoJsonReadOptions, GeoMapError, GeoMapOptions,
+        GeoMapSpec, GeoMapSummary, GeoPosition, GeoProjection,
+    };
+
+    #[cfg(feature = "network")]
+    pub use crate::network::{
+        SankeyError, SankeyFlow, SankeyLegendItem, SankeyLink, SankeyNode, SankeyOptions,
+        SankeySpec, SankeyStage, SunburstError, SunburstLegendItem, SunburstNode, SunburstOptions,
+        SunburstPath, SunburstSpec,
+    };
+
+    #[cfg(feature = "stats")]
+    pub use crate::stats::{
+        confidence_radius_3d, CovarianceEstimator, Gaussian3, Gaussian3Error, Gaussian3FitOptions,
+        Gaussian3Mixture, Gaussian3MixtureFitOptions, Mat3, Vec3,
+    };
+}
+
+#[cfg(feature = "charts")]
+pub use berthacharts_charts::{
+    BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, HeatmapCell,
+    HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
+    LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions,
+    ScatterPlotSpec, ScatterPlotSummary,
+};
+pub use berthacharts_core::{
+    Chart, ChartError, ChartSize, ChartSpec, Dataset, DatasetId, Guide, Mark, Rect, Scene,
+    Viewport, Workspace,
+};
+#[cfg(feature = "geo")]
+pub use berthacharts_geo::{
+    features_from_geojson_str, features_from_geojson_str_with_options, GeoFeature, GeoGeometry,
+    GeoJsonError, GeoJsonReadOptions, GeoMapError, GeoMapOptions, GeoMapSpec, GeoMapSummary,
+    GeoPosition, GeoProjection,
+};
+#[cfg(feature = "network")]
+pub use berthacharts_network::{
+    SankeyError, SankeyFlow, SankeyLayout, SankeyLayoutNode, SankeyLayoutStage, SankeyLegendItem,
+    SankeyLink, SankeyNode, SankeyOptions, SankeyRibbon, SankeySpec, SankeyStage,
+    SunburstBranchSummary, SunburstError, SunburstLayout, SunburstLegendItem, SunburstNode,
+    SunburstOptions, SunburstPath, SunburstSector, SunburstSpec, SunburstSummary,
+};
+#[cfg(feature = "stats")]
+pub use berthacharts_stats::{
+    confidence_radius_3d, Bounds3, CovarianceEstimator, Gaussian3, Gaussian3Component,
+    Gaussian3DensityVoxel, Gaussian3Ellipsoid, Gaussian3Error, Gaussian3Feature,
+    Gaussian3FeatureGame, Gaussian3FitOptions, Gaussian3Mesh, Gaussian3Mixture,
+    Gaussian3MixtureCandidate, Gaussian3MixtureFitOptions, Gaussian3MixtureSelection,
+    Gaussian3Shapley, Gaussian3ShapleyInteraction, Gaussian3ShapleyScore, Gaussian3SigmaPoint,
+    Gaussian3SigmaPointSet, Gaussian3Summary, Mat3, SymmetricEigen3, Vec3,
+};
+#[cfg(feature = "transforms")]
+pub use berthacharts_transforms::{AggOp, Aggregate, Bin, FilterRange, Stack};

@@ -18,19 +18,27 @@ description = "Reference Leptos + WASM gallery for Bertha Charts — a living do
 # Path deps back to the root workspace. `../..` resolves to the project root.
 berthacharts-core          = { path = "../../crates/core" }
 berthacharts-charts        = { path = "../../crates/charts" }
+berthacharts-geo           = { path = "../../crates/geo" }
 berthacharts-network       = { path = "../../crates/network" }
 berthacharts-renderer-wgpu = { path = "../../crates/renderer-wgpu" }
 berthacharts-leptos        = { path = "../../crates/leptos" }
 
 leptos = { version = "0.7", features = ["csr"] }
 
+js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "DomRect",
     "Element",
     "HtmlCanvasElement",
+    "HtmlElement",
     "HtmlInputElement",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
+    "Location",
+    "ResizeObserver",
     "Window",
 ] }
 console_error_panic_hook = "0.1"

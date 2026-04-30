@@ -420,16 +420,18 @@ impl Renderer {
                 .coord(layer.coord)
                 .ok_or(RenderError::MissingCoord(layer.coord.get()))?;
             for mark in &layer.marks {
+                let mut buffers = GeometryBuffers {
+                    commands: &mut commands,
+                    rects: &mut instances,
+                    triangles: &mut triangles,
+                };
                 collect_mark(
                     mark.as_ref(),
                     coord.as_ref(),
                     &scales,
                     &datasets,
                     scene,
-                    layer,
-                    &mut commands,
-                    &mut instances,
-                    &mut triangles,
+                    &mut buffers,
                 );
             }
         }
@@ -896,16 +898,19 @@ fn sort_layers(scene: &Scene) -> Vec<&Layer> {
     v
 }
 
+struct GeometryBuffers<'a> {
+    commands: &'a mut Vec<DrawCommand>,
+    rects: &'a mut Vec<RectInstance>,
+    triangles: &'a mut Vec<TriangleVertex>,
+}
+
 fn collect_mark(
     mark: &dyn Mark,
     coord: &dyn Coord,
     scales: &core::ScaleRegistry,
     datasets: &core::DatasetRegistry,
     scene: &Scene,
-    _layer: &Layer,
-    commands: &mut Vec<DrawCommand>,
-    out: &mut Vec<RectInstance>,
-    triangles: &mut Vec<TriangleVertex>,
+    buffers: &mut GeometryBuffers<'_>,
 ) {
     let tess_ctx = TessellateCtx::new(
         coord,
@@ -914,56 +919,57 @@ fn collect_mark(
         scene.viewport.plot_area,
         scene.viewport.device_pixel_ratio,
     );
-    walk_geometry(mark.tessellate(&tess_ctx), commands, out, triangles);
+    walk_geometry(mark.tessellate(&tess_ctx), buffers);
 }
 
-fn walk_geometry(
-    g: Geometry,
-    commands: &mut Vec<DrawCommand>,
-    out: &mut Vec<RectInstance>,
-    triangles: &mut Vec<TriangleVertex>,
-) {
+fn walk_geometry(g: Geometry, buffers: &mut GeometryBuffers<'_>) {
     match g {
         Geometry::Rects(rs) => {
-            let start = out.len();
+            let start = buffers.rects.len();
             for r in rs {
-                out.push(rect_to_instance(&r));
+                buffers.rects.push(rect_to_instance(&r));
             }
-            if let Some((start, count)) = draw_range(start, out.len()) {
-                commands.push(DrawCommand::Rects { start, count });
+            if let Some((start, count)) = draw_range(start, buffers.rects.len()) {
+                buffers.commands.push(DrawCommand::Rects { start, count });
             }
         }
         Geometry::Triangles(ts) => {
-            let start = triangles.len();
+            let start = buffers.triangles.len();
             for t in ts {
-                push_triangle(&t, triangles);
+                push_triangle(&t, buffers.triangles);
             }
-            if let Some((start, count)) = draw_range(start, triangles.len()) {
-                commands.push(DrawCommand::Triangles { start, count });
+            if let Some((start, count)) = draw_range(start, buffers.triangles.len()) {
+                buffers
+                    .commands
+                    .push(DrawCommand::Triangles { start, count });
             }
         }
         Geometry::Mixed(children) => {
             for c in children {
-                walk_geometry(c, commands, out, triangles);
+                walk_geometry(c, buffers);
             }
         }
         Geometry::Empty => {}
         Geometry::Points(ps) => {
-            let start = triangles.len();
+            let start = buffers.triangles.len();
             for p in ps {
-                push_point(&p, triangles);
+                push_point(&p, buffers.triangles);
             }
-            if let Some((start, count)) = draw_range(start, triangles.len()) {
-                commands.push(DrawCommand::Triangles { start, count });
+            if let Some((start, count)) = draw_range(start, buffers.triangles.len()) {
+                buffers
+                    .commands
+                    .push(DrawCommand::Triangles { start, count });
             }
         }
         Geometry::Lines(ls) => {
-            let start = triangles.len();
+            let start = buffers.triangles.len();
             for line in ls {
-                push_line(&line, triangles);
+                push_line(&line, buffers.triangles);
             }
-            if let Some((start, count)) = draw_range(start, triangles.len()) {
-                commands.push(DrawCommand::Triangles { start, count });
+            if let Some((start, count)) = draw_range(start, buffers.triangles.len()) {
+                buffers
+                    .commands
+                    .push(DrawCommand::Triangles { start, count });
             }
         }
         Geometry::Paths(_) => {}

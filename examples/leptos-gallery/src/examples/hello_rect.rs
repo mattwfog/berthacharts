@@ -81,14 +81,16 @@ pub fn View() -> impl IntoView {
             compact_label(157.0, 110.0, "measure", "146 x 96", LabelAnchor::Center),
             compact_label(216.0, 138.0, "annotation", "80 x 48", LabelAnchor::Bottom),
         ])));
-        scene.interactions.push(berthacharts_core::Interaction::SnapTargets(
-            SnapTargetSet::new(vec![
-                SnapTarget::new(161.0, 110.0, SnapKind::Center).with_label("reference center"),
-                SnapTarget::new(157.0, 110.0, SnapKind::Center).with_label("measure center"),
-                SnapTarget::new(216.0, 138.0, SnapKind::Center).with_label("annotation center"),
-            ])
-            .with_name("rectangle centers"),
-        ));
+        scene
+            .interactions
+            .push(berthacharts_core::Interaction::SnapTargets(
+                SnapTargetSet::new(vec![
+                    SnapTarget::new(161.0, 110.0, SnapKind::Center).with_label("reference center"),
+                    SnapTarget::new(157.0, 110.0, SnapKind::Center).with_label("measure center"),
+                    SnapTarget::new(216.0, 138.0, SnapKind::Center).with_label("annotation center"),
+                ])
+                .with_name("rectangle centers"),
+            ));
 
         let mut chart = Chart::new(ws, scene.viewport);
         chart.set_scene(scene);

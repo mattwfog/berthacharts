@@ -321,15 +321,9 @@ fn circle_geometry_snap_targets(chart: &Chart) -> Vec<SnapTarget> {
 fn collect_circle_snap_targets(geometry: &Geometry, targets: &mut Vec<SnapTarget>) {
     match geometry {
         Geometry::Points(points) => {
-            targets.extend(
-                points
-                    .iter()
-                    .filter(|point| point.shape == 0)
-                    .map(|point| {
-                        SnapTarget::new(point.x, point.y, SnapKind::Point)
-                            .with_radius(point.r)
-                    }),
-            );
+            targets.extend(points.iter().filter(|point| point.shape == 0).map(|point| {
+                SnapTarget::new(point.x, point.y, SnapKind::Point).with_radius(point.r)
+            }));
         }
         Geometry::Mixed(parts) => {
             for part in parts {

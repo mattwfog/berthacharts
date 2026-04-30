@@ -80,8 +80,12 @@ fn demo_scatter_spec() -> ScatterPlotSpec {
         ScatterDatum::new("Delta", 4.0, 8.8).with_group("expansion"),
         ScatterDatum::new("Epsilon", 4.7, 9.4).with_group("expansion"),
         ScatterDatum::new("Zeta", 5.5, 11.8).with_group("expansion"),
-        ScatterDatum::new("Eta", 6.1, 13.2).with_group("frontier").with_radius(6.4),
-        ScatterDatum::new("Theta", 6.8, 12.4).with_group("frontier").with_radius(6.0),
+        ScatterDatum::new("Eta", 6.1, 13.2)
+            .with_group("frontier")
+            .with_radius(6.4),
+        ScatterDatum::new("Theta", 6.8, 12.4)
+            .with_group("frontier")
+            .with_radius(6.0),
         ScatterDatum::new("Iota", 5.0, 7.2).with_group("watch"),
         ScatterDatum::new("Kappa", 6.4, 9.0).with_group("watch"),
     ])

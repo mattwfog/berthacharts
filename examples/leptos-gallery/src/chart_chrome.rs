@@ -36,3 +36,14 @@ fn display_toggle_class(active: bool) -> &'static str {
         "display-toggle"
     }
 }
+
+pub fn stage_class(base: &str, hidden_when_false: &[(&str, bool)]) -> String {
+    let mut class = String::from(base);
+    for (hidden_class, visible) in hidden_when_false {
+        if !*visible {
+            class.push(' ');
+            class.push_str(hidden_class);
+        }
+    }
+    class
+}

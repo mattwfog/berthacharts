@@ -40,6 +40,23 @@ pub fn event_offset_in_current_target(ev: &web_sys::MouseEvent) -> (f32, f32) {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub fn event_current_target_size(ev: &web_sys::MouseEvent) -> (f32, f32) {
+    let Some(target) = ev.current_target() else {
+        return (0.0, 0.0);
+    };
+    let Ok(element) = target.dyn_into::<web_sys::Element>() else {
+        return (0.0, 0.0);
+    };
+    let rect = element.get_bounding_client_rect();
+    (rect.width() as f32, rect.height() as f32)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn event_current_target_size(_ev: &web_sys::MouseEvent) -> (f32, f32) {
+    (0.0, 0.0)
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn event_target_has_class(ev: &web_sys::MouseEvent, class_name: &str) -> bool {
     let Some(target) = ev.target() else {
         return false;

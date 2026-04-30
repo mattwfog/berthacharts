@@ -1,37 +1,46 @@
 //! App shell + routing.
 //!
-//! The gallery is a flat list today — no routing state to manage beyond
-//! scroll anchors. When the example set grows, swap in `leptos_router`.
+//! The gallery catalog owns section order and anchors. The shell renders that
+//! registry and provides runtime context to each example.
 
 use leptos::prelude::*;
 
-use crate::examples;
+use crate::gallery;
 
 /// Top-level app.
 #[component]
 pub fn App() -> impl IntoView {
+    let runtime = gallery::detect_runtime();
+    let meta_label = runtime.meta_label();
+    provide_context(runtime);
+
+    let nav_items = gallery::EXAMPLES
+        .iter()
+        .map(|example| {
+            view! {
+                <a href=example.href()>{example.nav_label}</a>
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let examples = gallery::EXAMPLES
+        .iter()
+        .copied()
+        .map(gallery::render_example)
+        .collect::<Vec<_>>();
+
     view! {
         <header>
             <h1>"Bertha Charts"</h1>
-            <span class="meta">"v0.0.1 · Leptos · WebGL2"</span>
+            <span class="meta">{meta_label}</span>
         </header>
 
         <nav>
-            <a href="#hello-rect">"Layers"</a>
-            <a href="#bar-chart">"Revenue Bars"</a>
-            <a href="#line-chart">"Lines"</a>
-            <a href="#scatter-plot">"Scatter"</a>
-            <a href="#grid">"Heatmap"</a>
-            <a href="#sankey">"Sankey"</a>
+            {nav_items}
         </nav>
 
         <main>
-            <examples::hello_rect::View />
-            <examples::bar_chart::View />
-            <examples::line_chart::View />
-            <examples::scatter_plot::View />
-            <examples::grid::View />
-            <examples::sankey::View />
+            {examples}
         </main>
     }
 }

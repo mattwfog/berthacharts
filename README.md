@@ -5,12 +5,62 @@ sophisticated, analytically-deep data visualization — consumable from React
 (via WASM) and Leptos (natively).
 
 **Status:** v0.0.1 — pre-release. Core kernel, wgpu renderer, and a starter
-set of marks are implemented; domain crates (transforms / stats / dist /
-finance / anno) and the React/Leptos binding crates are stubs reserving the
-public surface and will land in v0.1.x. Public traits are not yet stable.
+set of reusable chart specs are implemented. Public traits are not yet stable.
+
+## Quick Start
+
+Use the facade crate for application code:
+
+```toml
+[dependencies]
+berthacharts = { path = "crates/berthacharts" }
+```
+
+Then build chart specs through the prelude:
+
+```rust
+use berthacharts::prelude::*;
+
+let spec = BarChartSpec::new(vec![
+    BarDatum::new("Q1", 24.0),
+    BarDatum::new("Q2", 31.0),
+    BarDatum::new("Q3", 37.0),
+])
+.with_target(30.0);
+
+let chart = spec.build(ChartSize::new(640, 360))?;
+assert!(!chart.scene().layers.is_empty());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Default features include `charts` and `transforms`. Optional feature flags are
+available for `stats`, `distribution`, `finance`, `geo`, `network`,
+`annotations`, `renderer-wgpu`, `leptos`, and `react`.
+
+Runnable examples:
+
+```sh
+cargo run -p berthacharts --example basic
+cargo run -p berthacharts --example multiple_charts
+cargo run -p berthacharts --features network --example network
+```
+
+For coordinated views or shared state, build into an existing workspace:
+
+```rust
+use berthacharts::prelude::*;
+
+let workspace = Workspace::new();
+let chart = BarChartSpec::new(vec![BarDatum::new("A", 1.0)])
+    .build_in(workspace.clone(), ChartSize::new(480, 320))?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ## Architecture
 
+- **Facade** (`berthacharts`) — one import path for application code. Re-exports
+  core primitives, chart specs, transforms, and optional domain/rendering
+  crates behind feature flags.
 - **Core kernel** (`berthacharts-core`) — scales, coordinate systems,
   datasets, scene graph, mark/transform traits, lazy memoized transform DAG,
   picker, event system. No rendering, no framework bindings.
@@ -46,7 +96,14 @@ A working Leptos example wiring core → renderer → DOM lives under
 ```sh
 cargo check --workspace
 cargo test --workspace
+cargo test -p berthacharts
+cargo test -p berthacharts --features network,geo,stats
 ```
+
+`cargo package -p berthacharts` requires the leaf crates
+(`berthacharts-core`, `berthacharts-charts`, `berthacharts-transforms`, etc.)
+to be published first, because Cargo resolves facade dependencies through the
+registry during package verification.
 
 The Leptos gallery is built with [Trunk](https://trunkrs.dev/):
 

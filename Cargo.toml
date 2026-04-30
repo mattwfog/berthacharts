@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/berthacharts",
     "crates/core",
     "crates/transforms",
     "crates/charts",
     "crates/stats",
     "crates/dist",
     "crates/finance",
+    "crates/geo",
     "crates/network",
     "crates/anno",
     "crates/renderer-wgpu",
@@ -31,9 +33,12 @@ berthacharts-charts       = { path = "crates/charts",          version = "0.0.1"
 berthacharts-stats        = { path = "crates/stats",           version = "0.0.1" }
 berthacharts-dist         = { path = "crates/dist",            version = "0.0.1" }
 berthacharts-finance      = { path = "crates/finance",         version = "0.0.1" }
+berthacharts-geo          = { path = "crates/geo",             version = "0.0.1" }
 berthacharts-network      = { path = "crates/network",         version = "0.0.1" }
 berthacharts-anno         = { path = "crates/anno",            version = "0.0.1" }
 berthacharts-renderer-wgpu = { path = "crates/renderer-wgpu",  version = "0.0.1" }
+berthacharts-leptos       = { path = "crates/leptos",          version = "0.0.1" }
+berthacharts-bindings-react = { path = "crates/bindings-react", version = "0.0.1" }
 
 # third-party — keep the list tight and shared
 # `compile-time-rng` avoids a `getrandom` runtime dep, which sidesteps the
@@ -44,6 +49,7 @@ glam       = { version = "0.27", features = ["bytemuck"] }
 smallvec   = "1.13"
 thiserror  = "1.0"
 serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # renderer
 wgpu       = "0.19"

@@ -3,45 +3,38 @@
 use std::sync::Arc;
 
 use berthacharts_charts::bar::{BarChartOptions, BarChartSpec, BarDatum};
-use berthacharts_core::{ChartSize, ChartSpec};
 use leptos::prelude::*;
 
-use crate::chart_canvas::{BuildChart, ChartCanvas};
-use crate::chart_chrome::{DisplayControls, DisplayToggleButton};
+use crate::chart_canvas::{chart_builder, ChartCanvas};
+use crate::chart_chrome::{stage_class, DisplayControls, DisplayToggleButton};
+use crate::data::{self, BarChartDataset};
+use crate::gallery::runtime_context;
 
 const W: u32 = 680;
 const H: u32 = 390;
-const TARGET_VALUE: f32 = 21.0;
 
 #[component]
 pub fn View() -> impl IntoView {
+    let runtime = runtime_context();
+    let dataset = data::revenue_bars(runtime.data_profile);
     let show_data_labels = RwSignal::new(true);
     let show_axes = RwSignal::new(true);
     let show_annotations = RwSignal::new(true);
     let show_legend = RwSignal::new(true);
 
-    let spec = Arc::new(demo_bar_spec());
+    let spec = Arc::new(bar_spec(dataset));
     let summary = spec.summary();
     let slope_label = format_slope(summary.slope);
     let sigma_label = format!("{:.1}", summary.sigma);
     let peak_label = format!("{:.0}", summary.peak);
-    let build_spec = spec.clone();
-
-    let build: BuildChart = Arc::new(move |ws| {
-        build_spec
-            .build_chart(ws, ChartSize::new(W, H))
-            .expect("demo bar spec should be valid")
-    });
+    let build = chart_builder(spec.clone(), W, H, "demo bar spec");
 
     view! {
         <section id="bar-chart" class="example">
             <div class="example-head">
                 <div>
-                    <h2>"Revenue by Month"</h2>
-                    <p>
-                        "Bars carry the observed values; the overlay adds a fitted trend, residual band, "
-                        "target threshold, and outlier markers."
-                    </p>
+                    <h2>{dataset.title}</h2>
+                    <p>{dataset.description}</p>
                 </div>
                 <div class="stat-strip">
                     <span><strong>{peak_label}</strong>" peak"</span>
@@ -56,39 +49,34 @@ pub fn View() -> impl IntoView {
                 <DisplayToggleButton label="Annotations" state=show_annotations />
                 <DisplayToggleButton label="Legend" state=show_legend />
             </DisplayControls>
-            <div class=move || bar_stage_class(
-                show_data_labels.get(),
-                show_axes.get(),
-                show_annotations.get(),
-                show_legend.get(),
-            )>
+            <div class=move || stage_class("chart-stage bar-stage", &[
+                ("hide-data-labels", show_data_labels.get()),
+                ("hide-axes", show_axes.get()),
+                ("hide-annotations", show_annotations.get()),
+                ("hide-legend", show_legend.get()),
+            ])>
                 <ChartCanvas width={W} height={H} builder={build} />
-                <div class="bar-annotations">
-                    <span class="chart-annotation target-annotation">"target 21"</span>
-                    <span class="chart-annotation trend-annotation">"linear fit + uncertainty"</span>
-                </div>
             </div>
         </section>
     }
 }
 
-fn demo_bar_spec() -> BarChartSpec {
+fn bar_spec(dataset: BarChartDataset) -> BarChartSpec {
     let mut options = BarChartOptions {
-        target: Some(TARGET_VALUE),
-        x_axis_label: "Month".to_string(),
-        y_axis_label: "Revenue".to_string(),
+        target: Some(dataset.target),
+        x_axis_label: dataset.x_axis_label.to_string(),
+        y_axis_label: dataset.y_axis_label.to_string(),
         ..BarChartOptions::default()
     };
-    options.y_max = Some(30.0);
+    options.y_max = Some(dataset.y_max);
 
-    BarChartSpec::new(vec![
-        BarDatum::new("Jan", 12.0),
-        BarDatum::new("Feb", 19.0),
-        BarDatum::new("Mar", 7.0),
-        BarDatum::new("Apr", 22.0),
-        BarDatum::new("May", 16.0),
-        BarDatum::new("Jun", 25.0),
-    ])
+    BarChartSpec::new(
+        dataset
+            .values
+            .iter()
+            .map(|datum| BarDatum::new(datum.label, datum.value))
+            .collect(),
+    )
     .with_options(options)
 }
 
@@ -98,26 +86,4 @@ fn format_slope(slope: f32) -> String {
     } else {
         format!("{slope:.1}/mo")
     }
-}
-
-fn bar_stage_class(
-    show_data_labels: bool,
-    show_axes: bool,
-    show_annotations: bool,
-    show_legend: bool,
-) -> String {
-    let mut class = String::from("chart-stage bar-stage");
-    if !show_data_labels {
-        class.push_str(" hide-data-labels");
-    }
-    if !show_axes {
-        class.push_str(" hide-axes");
-    }
-    if !show_annotations {
-        class.push_str(" hide-annotations");
-    }
-    if !show_legend {
-        class.push_str(" hide-legend");
-    }
-    class
 }

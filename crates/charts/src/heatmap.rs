@@ -32,6 +32,14 @@ pub struct HeatmapCell {
     pub value: f32,
     /// Optional comparison baseline for signal classification.
     pub baseline: Option<f32>,
+    /// Optional secondary text for direct labels.
+    pub label_detail: Option<String>,
+    /// Optional first domain-specific tooltip detail.
+    pub tooltip_detail_1: Option<String>,
+    /// Optional second domain-specific tooltip detail.
+    pub tooltip_detail_2: Option<String>,
+    /// Optional third domain-specific tooltip detail.
+    pub tooltip_detail_3: Option<String>,
 }
 
 impl HeatmapCell {
@@ -43,6 +51,10 @@ impl HeatmapCell {
             column: column.into(),
             value,
             baseline: None,
+            label_detail: None,
+            tooltip_detail_1: None,
+            tooltip_detail_2: None,
+            tooltip_detail_3: None,
         }
     }
 
@@ -50,6 +62,34 @@ impl HeatmapCell {
     #[must_use]
     pub const fn with_baseline(mut self, baseline: f32) -> Self {
         self.baseline = Some(baseline);
+        self
+    }
+
+    /// Set custom secondary text for the direct label.
+    #[must_use]
+    pub fn with_label_detail(mut self, detail: impl Into<String>) -> Self {
+        self.label_detail = Some(detail.into());
+        self
+    }
+
+    /// Set the first domain-specific tooltip detail.
+    #[must_use]
+    pub fn with_tooltip_detail_1(mut self, detail: impl Into<String>) -> Self {
+        self.tooltip_detail_1 = Some(detail.into());
+        self
+    }
+
+    /// Set the second domain-specific tooltip detail.
+    #[must_use]
+    pub fn with_tooltip_detail_2(mut self, detail: impl Into<String>) -> Self {
+        self.tooltip_detail_2 = Some(detail.into());
+        self
+    }
+
+    /// Set the third domain-specific tooltip detail.
+    #[must_use]
+    pub fn with_tooltip_detail_3(mut self, detail: impl Into<String>) -> Self {
+        self.tooltip_detail_3 = Some(detail.into());
         self
     }
 }
@@ -63,6 +103,30 @@ pub struct HeatmapOptions {
     pub signal_threshold: f32,
     /// Legend title.
     pub legend_title: String,
+    /// Tooltip label for row values.
+    pub row_tooltip_label: String,
+    /// Tooltip label for the primary value.
+    pub value_tooltip_label: String,
+    /// Tooltip label for the value-baseline delta.
+    pub delta_tooltip_label: String,
+    /// Tooltip label for the signal classification.
+    pub signal_tooltip_label: String,
+    /// Optional label for the first domain-specific tooltip detail.
+    pub tooltip_detail_1_label: Option<String>,
+    /// Optional label for the second domain-specific tooltip detail.
+    pub tooltip_detail_2_label: Option<String>,
+    /// Optional label for the third domain-specific tooltip detail.
+    pub tooltip_detail_3_label: Option<String>,
+    /// Label for cells above baseline by at least `signal_threshold`.
+    pub strong_signal_label: String,
+    /// Label for cells below baseline by at least `signal_threshold`.
+    pub watch_signal_label: String,
+    /// Label for cells within the signal threshold.
+    pub neutral_signal_label: String,
+    /// Whether to draw per-cell signal glyphs for above/below-baseline cells.
+    pub show_signal_glyphs: bool,
+    /// Whether direct cell labels should include their secondary detail line.
+    pub show_label_details: bool,
     /// Maximum visible data labels.
     pub max_visible_labels: Option<usize>,
 }
@@ -73,6 +137,18 @@ impl Default for HeatmapOptions {
             cell_padding: 8.0,
             signal_threshold: 0.07,
             legend_title: "Signal".to_string(),
+            row_tooltip_label: "Row".to_string(),
+            value_tooltip_label: "Score".to_string(),
+            delta_tooltip_label: "Delta".to_string(),
+            signal_tooltip_label: "Signal".to_string(),
+            tooltip_detail_1_label: None,
+            tooltip_detail_2_label: None,
+            tooltip_detail_3_label: None,
+            strong_signal_label: "above baseline".to_string(),
+            watch_signal_label: "watch".to_string(),
+            neutral_signal_label: "neutral".to_string(),
+            show_signal_glyphs: false,
+            show_label_details: true,
             max_visible_labels: None,
         }
     }
@@ -282,8 +358,11 @@ impl ChartSpec for HeatmapSpec {
         let rows = self.resolved_rows();
         let columns = self.resolved_columns();
         let baselines = resolved_column_baselines(&self.cells, &columns);
-        let cell_w = size.width as f32 / columns.len().max(1) as f32;
-        let cell_h = size.height as f32 / rows.len().max(1) as f32;
+        let header = heatmap_header_layout(size, &rows, &columns);
+        let grid_w = (size.width as f32 - header.row_width).max(columns.len().max(1) as f32);
+        let grid_h = (size.height as f32 - header.column_height).max(rows.len().max(1) as f32);
+        let cell_w = grid_w / columns.len().max(1) as f32;
+        let cell_h = grid_h / rows.len().max(1) as f32;
         let pad = self
             .options
             .cell_padding
@@ -303,6 +382,9 @@ impl ChartSpec for HeatmapSpec {
         let mut row_col = Vec::with_capacity(self.cells.len());
         let mut column_col = Vec::with_capacity(self.cells.len());
         let mut signal_col = Vec::with_capacity(self.cells.len());
+        let mut detail_1_col = Vec::with_capacity(self.cells.len());
+        let mut detail_2_col = Vec::with_capacity(self.cells.len());
+        let mut detail_3_col = Vec::with_capacity(self.cells.len());
         let mut labels = Vec::with_capacity(self.cells.len());
         let mut glyphs = Vec::new();
         let mut snap_targets = Vec::with_capacity(self.cells.len());
@@ -314,10 +396,10 @@ impl ChartSpec for HeatmapSpec {
                 .baseline
                 .unwrap_or_else(|| baseline_for(&columns, &baselines, &cell.column));
             let delta = cell.value - baseline;
-            let signal = signal_label(delta, self.options.signal_threshold);
+            let signal = signal_label(delta, &self.options);
             let [cr, cg, cb] = heatmap_color(cell.value, delta);
-            let left = column_index as f32 * cell_w;
-            let top = row_index as f32 * cell_h;
+            let left = header.row_width + column_index as f32 * cell_w;
+            let top = header.column_height + row_index as f32 * cell_h;
             let center_x = left + cell_w * 0.5;
             let center_y = top + cell_h * 0.5;
 
@@ -333,12 +415,36 @@ impl ChartSpec for HeatmapSpec {
             row_col.push(Arc::<str>::from(cell.row.clone()));
             column_col.push(Arc::<str>::from(cell.column.clone()));
             signal_col.push(Arc::<str>::from(signal));
+            detail_1_col.push(Arc::<str>::from(
+                cell.tooltip_detail_1.clone().unwrap_or_default(),
+            ));
+            detail_2_col.push(Arc::<str>::from(
+                cell.tooltip_detail_2.clone().unwrap_or_default(),
+            ));
+            detail_3_col.push(Arc::<str>::from(
+                cell.tooltip_detail_3.clone().unwrap_or_default(),
+            ));
+            let label_detail = if self.options.show_label_details {
+                Some(
+                    cell.label_detail
+                        .as_deref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| format_delta(delta * 100.0)),
+                )
+            } else {
+                None
+            };
             labels.push(heatmap_data_label(
                 center_x,
-                center_y + cell_h * 0.18,
+                if label_detail.is_some() {
+                    center_y + cell_h * 0.18
+                } else {
+                    center_y
+                },
                 cell.value,
                 delta,
                 self.options.signal_threshold,
+                label_detail,
             ));
             snap_targets.push(
                 SnapTarget::new(center_x, center_y, SnapKind::Center)
@@ -346,11 +452,13 @@ impl ChartSpec for HeatmapSpec {
                     .with_label(format!("{} {}", cell.row, cell.column)),
             );
 
-            if delta.abs() >= self.options.signal_threshold {
+            if self.options.show_signal_glyphs && delta.abs() >= self.options.signal_threshold {
                 let positive = delta > 0.0;
+                let glyph_x_offset = (cell_w * 0.18).clamp(8.0, 16.0);
+                let glyph_y_offset = (cell_h * 0.28).clamp(8.0, 16.0);
                 glyphs.push(PointPrim {
-                    x: left + cell_w - pad - 16.0,
-                    y: top + pad + 16.0,
+                    x: left + cell_w - pad - glyph_x_offset,
+                    y: top + pad + glyph_y_offset,
                     r: 5.4,
                     shape: if positive { 3 } else { 2 },
                     fill: if positive {
@@ -395,6 +503,18 @@ impl ChartSpec for HeatmapSpec {
                 ("row".into(), Column::Utf8(ColumnData::new(row_col))),
                 ("column".into(), Column::Utf8(ColumnData::new(column_col))),
                 ("signal".into(), Column::Utf8(ColumnData::new(signal_col))),
+                (
+                    "detail_1".into(),
+                    Column::Utf8(ColumnData::new(detail_1_col)),
+                ),
+                (
+                    "detail_2".into(),
+                    Column::Utf8(ColumnData::new(detail_2_col)),
+                ),
+                (
+                    "detail_3".into(),
+                    Column::Utf8(ColumnData::new(detail_3_col)),
+                ),
             ],
         ));
 
@@ -448,18 +568,24 @@ impl ChartSpec for HeatmapSpec {
             z: 0,
             clip: None,
         });
+        let mut tooltip_fields = vec![
+            TooltipField::new(self.options.row_tooltip_label.clone(), "row"),
+            TooltipField::new(self.options.value_tooltip_label.clone(), "score").as_percent(0),
+            TooltipField::new(self.options.delta_tooltip_label.clone(), "delta")
+                .as_signed_percent(0),
+            TooltipField::new(self.options.signal_tooltip_label.clone(), "signal").as_label(),
+        ];
+        if let Some(label) = &self.options.tooltip_detail_1_label {
+            tooltip_fields.push(TooltipField::new(label.clone(), "detail_1").as_label());
+        }
+        if let Some(label) = &self.options.tooltip_detail_2_label {
+            tooltip_fields.push(TooltipField::new(label.clone(), "detail_2").as_label());
+        }
+        if let Some(label) = &self.options.tooltip_detail_3_label {
+            tooltip_fields.push(TooltipField::new(label.clone(), "detail_3").as_label());
+        }
         scene.guides.push(Guide::Tooltip(
-            TooltipGuide::new(
-                CELL_MARK,
-                DATASET,
-                vec![
-                    TooltipField::new("Row", "row"),
-                    TooltipField::new("Score", "score").as_percent(0),
-                    TooltipField::new("Delta", "delta").as_signed_percent(0),
-                    TooltipField::new("Signal", "signal").as_label(),
-                ],
-            )
-            .with_title_column("column"),
+            TooltipGuide::new(CELL_MARK, DATASET, tooltip_fields).with_title_column("column"),
         ));
         let label_count = self
             .options
@@ -467,15 +593,35 @@ impl ChartSpec for HeatmapSpec {
             .unwrap_or(labels.len())
             .min(labels.len());
         scene.guides.push(Guide::Labels(
+            LabelGuide::new(heatmap_header_labels(
+                &rows,
+                &columns,
+                header.row_width,
+                header.column_height,
+                cell_w,
+                cell_h,
+            ))
+            .with_collision_padding(0.0),
+        ));
+        scene.guides.push(Guide::Labels(
             LabelGuide::new(labels)
                 .with_collision_padding(0.0)
                 .with_max_visible(label_count),
         ));
         scene.guides.push(Guide::Legend(
             LegendGuide::new(vec![
-                LegendItem::new("above baseline", [0.13, 0.66, 0.47, 1.0]),
-                LegendItem::new("watch", [0.85, 0.37, 0.33, 1.0]),
-                LegendItem::new("neutral", [0.56, 0.70, 0.82, 1.0]),
+                LegendItem::new(
+                    self.options.strong_signal_label.clone(),
+                    [0.13, 0.66, 0.47, 1.0],
+                ),
+                LegendItem::new(
+                    self.options.watch_signal_label.clone(),
+                    [0.85, 0.37, 0.33, 1.0],
+                ),
+                LegendItem::new(
+                    self.options.neutral_signal_label.clone(),
+                    [0.56, 0.70, 0.82, 1.0],
+                ),
             ])
             .with_title(self.options.legend_title.clone())
             .with_anchor(LegendAnchor::Bottom),
@@ -490,6 +636,81 @@ impl ChartSpec for HeatmapSpec {
         chart.set_scene(scene);
         Ok(chart)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HeatmapHeaderLayout {
+    row_width: f32,
+    column_height: f32,
+}
+
+fn heatmap_header_layout(
+    size: ChartSize,
+    rows: &[String],
+    columns: &[String],
+) -> HeatmapHeaderLayout {
+    let row_chars = rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0) as f32;
+    let column_chars = columns
+        .iter()
+        .map(|column| column.chars().count())
+        .max()
+        .unwrap_or(0) as f32;
+    let row_width = (row_chars * 8.0 + 42.0)
+        .clamp(72.0, 112.0)
+        .min(size.width as f32 * 0.24);
+    let column_height = (column_chars * 0.4 + 24.0)
+        .clamp(24.0, 34.0)
+        .min(size.height as f32 * 0.12);
+
+    HeatmapHeaderLayout {
+        row_width,
+        column_height,
+    }
+}
+
+fn heatmap_header_labels(
+    rows: &[String],
+    columns: &[String],
+    row_width: f32,
+    column_height: f32,
+    cell_w: f32,
+    cell_h: f32,
+) -> Vec<LabelItem> {
+    let mut labels = Vec::with_capacity(rows.len() + columns.len());
+
+    for (index, column) in columns.iter().enumerate() {
+        labels.push(
+            LabelItem::new(
+                row_width + index as f32 * cell_w + cell_w * 0.5,
+                column_height * 0.5,
+                column,
+            )
+            .with_kind(LabelKind::Column)
+            .with_priority(LabelPriority::Required)
+            .with_anchor(LabelAnchor::Center)
+            .with_reposition(false),
+        );
+    }
+
+    for (index, row) in rows.iter().enumerate() {
+        labels.push(
+            LabelItem::new(
+                row_width - 8.0,
+                column_height + index as f32 * cell_h + cell_h * 0.5,
+                row,
+            )
+            .with_kind(LabelKind::Column)
+            .with_priority(LabelPriority::Required)
+            .with_anchor(LabelAnchor::Left)
+            .with_reposition(false),
+        );
+    }
+
+    labels
 }
 
 fn infer_rows(cells: &[HeatmapCell]) -> Vec<String> {
@@ -543,19 +764,25 @@ fn baseline_for(columns: &[String], baselines: &[f32], column: &str) -> f32 {
         .unwrap_or_default()
 }
 
-fn signal_label(delta: f32, threshold: f32) -> &'static str {
-    if delta >= threshold {
-        "above baseline"
-    } else if delta <= -threshold {
-        "watch"
+fn signal_label(delta: f32, options: &HeatmapOptions) -> &str {
+    if delta >= options.signal_threshold {
+        &options.strong_signal_label
+    } else if delta <= -options.signal_threshold {
+        &options.watch_signal_label
     } else {
-        "neutral"
+        &options.neutral_signal_label
     }
 }
 
-fn heatmap_data_label(x: f32, y: f32, score: f32, delta: f32, threshold: f32) -> LabelItem {
-    LabelItem::new(x, y, format!("{:.0}", score * 100.0))
-        .with_detail(format_delta(delta * 100.0))
+fn heatmap_data_label(
+    x: f32,
+    y: f32,
+    score: f32,
+    delta: f32,
+    threshold: f32,
+    detail: Option<String>,
+) -> LabelItem {
+    let mut label = LabelItem::new(x, y, format!("{:.0}", score * 100.0))
         .with_kind(LabelKind::Data)
         .with_priority(if delta.abs() >= threshold {
             LabelPriority::Required
@@ -563,7 +790,11 @@ fn heatmap_data_label(x: f32, y: f32, score: f32, delta: f32, threshold: f32) ->
             LabelPriority::Important
         })
         .with_anchor(LabelAnchor::Center)
-        .with_reposition(false)
+        .with_reposition(false);
+    if let Some(detail) = detail {
+        label = label.with_detail(detail);
+    }
+    label
 }
 
 fn format_delta(value: f32) -> String {

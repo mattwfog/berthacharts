@@ -153,6 +153,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "berthacharts-geo"
+version = "0.0.1"
+dependencies = [
+ "berthacharts-core",
+ "serde_json",
+]
+
+[[package]]
 name = "berthacharts-leptos"
 version = "0.0.1"
 dependencies = [
@@ -170,11 +178,13 @@ version = "0.0.1"
 dependencies = [
  "berthacharts-charts",
  "berthacharts-core",
+ "berthacharts-geo",
  "berthacharts-leptos",
  "berthacharts-network",
  "berthacharts-renderer-wgpu",
  "console_error_panic_hook",
  "console_log",
+ "js-sys",
  "leptos",
  "log",
  "wasm-bindgen",

@@ -348,8 +348,7 @@ impl SankeySpec {
         };
 
         let mut layout_nodes = Vec::with_capacity(self.nodes.len());
-        for stage in 0..stage_count {
-            let slot = &stage_slots[stage];
+        for (stage, slot) in stage_slots.iter().enumerate().take(stage_count) {
             let used = self.stage_used_height(slot, &totals, flow_scale);
             let y0 = self.options.padding_top + (layout_span - used).max(0.0) * 0.5;
             let x = self.options.padding_left + stage as f32 * stage_step;

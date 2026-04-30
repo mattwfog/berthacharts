@@ -158,15 +158,29 @@ fn render_label_guide_html(html: &mut String, guide: &LabelGuide, width: u32, he
     for (index, rect) in placed {
         let item = &guide.items[index];
         let label_class = if item.tooltip.is_some() {
-            format!("{} guide-label-has-tooltip", label_kind_class(item.kind))
+            format!(
+                "{} {} guide-label-has-tooltip",
+                label_kind_class(item.kind),
+                label_anchor_class(item.anchor),
+            )
         } else {
-            label_kind_class(item.kind).to_string()
+            format!(
+                "{} {}",
+                label_kind_class(item.kind),
+                label_anchor_class(item.anchor),
+            )
+        };
+        let size_style = if item.kind == LabelKind::Column {
+            format!(";width:{:.1}px", rect.w)
+        } else {
+            String::new()
         };
         html.push_str(&format!(
-            "<span class=\"guide-label {}\" style=\"left:{:.1}px;top:{:.1}px\"{}>",
+            "<span class=\"guide-label {}\" style=\"left:{:.1}px;top:{:.1}px{}\"{}>",
             label_class,
             rect.x,
             rect.y,
+            size_style,
             if item.tooltip.is_some() {
                 " tabindex=\"0\""
             } else {
@@ -316,6 +330,21 @@ fn label_kind_class(kind: LabelKind) -> &'static str {
         LabelKind::Column => "guide-label-column",
         LabelKind::Annotation => "guide-label-annotation",
         _ => "guide-label-node",
+    }
+}
+
+fn label_anchor_class(anchor: LabelAnchor) -> &'static str {
+    match anchor {
+        LabelAnchor::Center => "guide-label-anchor-center",
+        LabelAnchor::Top => "guide-label-anchor-top",
+        LabelAnchor::Bottom => "guide-label-anchor-bottom",
+        LabelAnchor::Left => "guide-label-anchor-left",
+        LabelAnchor::Right => "guide-label-anchor-right",
+        LabelAnchor::TopLeft => "guide-label-anchor-top-left",
+        LabelAnchor::TopRight => "guide-label-anchor-top-right",
+        LabelAnchor::BottomLeft => "guide-label-anchor-bottom-left",
+        LabelAnchor::BottomRight => "guide-label-anchor-bottom-right",
+        _ => "guide-label-anchor-center",
     }
 }
 

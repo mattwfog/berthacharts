@@ -1,0 +1,14 @@
+[package]
+name = "berthacharts-geo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+description = "Geospatial chart specifications, projections, and GeoJSON support for Bertha Charts."
+
+[dependencies]
+berthacharts-core = { workspace = true }
+serde_json = { workspace = true }

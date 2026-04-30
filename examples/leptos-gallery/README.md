@@ -19,10 +19,42 @@ trunk serve                               # http://127.0.0.1:8787
 ## Structure
 
 - `src/main.rs` — mounts the Leptos app.
-- `src/app.rs` — top-level shell + nav.
+- `src/app.rs` — top-level shell.
+- `src/gallery.rs` — runtime profile detection and the single example catalog
+  used by nav and section rendering.
+- `src/data.rs` — plain reusable data fixtures that chart specs adapt into
+  `berthacharts-*` input types.
 - `src/chart_canvas.rs` — reusable `<ChartCanvas>` component that bridges
   Leptos's `NodeRef<Canvas>` to `berthacharts_renderer_wgpu::Renderer`.
 - `src/examples/<name>.rs` — one file per demo.
+
+## Runtime profiles
+
+The gallery detects local vs hosted environments from `window.location` and
+accepts a data profile through the URL:
+
+```sh
+http://127.0.0.1:8787/?profile=retail
+http://127.0.0.1:8787/?profile=growth
+http://127.0.0.1:8787/?profile=ops
+```
+
+Examples should read `gallery::runtime_context()` and map
+`runtime.data_profile` to data from `src/data.rs` or a future loader. Keep the
+data shape plain and chart-agnostic first, then adapt it into the specific spec
+type inside the example module.
+
+Larger dashboards can keep local domain structs when that keeps the module
+cohesive. `comp_mtd_sales.rs` uses this pattern: one `CompSalesDataset`
+contains labels, planning assumptions, slices, scenarios, economics, and focus
+queue text, while the component and spec builders stay profile-agnostic.
+
+For repeat chart plumbing, use the shared helpers:
+
+- `chart_canvas::chart_builder(...)` for `Arc<Spec>` to `<ChartCanvas>` builder
+  closures.
+- `chart_chrome::stage_class(...)` for display toggles that map to
+  `hide-*` CSS classes.
 
 ## Quality gates
 
@@ -48,7 +80,7 @@ guide budgets, then redraw the canvas and overlay together.
 2. Export a `#[component] pub fn View()` that builds a chart and wraps a
    `<ChartCanvas>`.
 3. Add `pub mod scatter;` to `src/examples/mod.rs`.
-4. Add `<examples::scatter::View />` to `App` in `src/app.rs`.
+4. Add one descriptor and render arm in `src/gallery.rs`.
 
 ## Intentional limitations (v0.1)
 

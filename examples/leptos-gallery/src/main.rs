@@ -6,8 +6,10 @@ mod annotation_layer;
 mod app;
 mod chart_canvas;
 mod chart_chrome;
+mod data;
 mod dom_events;
 mod examples;
+mod gallery;
 mod guide_overlay;
 
 fn main() {
