@@ -127,6 +127,8 @@ pub enum ExampleKind {
     UnifiedDataStudio,
     LineChart,
     GrowthModel,
+    StateSpaceModels,
+    StateSpaceFrameworks,
     PlanningWorkspace,
     ScatterPlot,
     GameTheory,
@@ -174,6 +176,16 @@ pub const EXAMPLES: &[ExampleDescriptor] = &[
     ExampleDescriptor::new(ExampleKind::LineChart, "line-chart", "Lines"),
     ExampleDescriptor::new(ExampleKind::GrowthModel, "growth-model", "Growth Model"),
     ExampleDescriptor::new(
+        ExampleKind::StateSpaceModels,
+        "state-space-models",
+        "State Space",
+    ),
+    ExampleDescriptor::new(
+        ExampleKind::StateSpaceFrameworks,
+        "state-space-frameworks",
+        "SSM Frameworks",
+    ),
+    ExampleDescriptor::new(
         ExampleKind::PlanningWorkspace,
         "planning-workspace",
         "Planning",
@@ -209,6 +221,12 @@ pub fn render_example(example: ExampleDescriptor) -> AnyView {
         }
         ExampleKind::LineChart => view! { <examples::line_chart::View /> }.into_any(),
         ExampleKind::GrowthModel => view! { <examples::growth_model::View /> }.into_any(),
+        ExampleKind::StateSpaceModels => {
+            view! { <examples::state_space_models::View /> }.into_any()
+        }
+        ExampleKind::StateSpaceFrameworks => {
+            view! { <examples::state_space_frameworks::View /> }.into_any()
+        }
         ExampleKind::PlanningWorkspace => {
             view! { <examples::planning_workspace::View /> }.into_any()
         }

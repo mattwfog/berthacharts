@@ -68,9 +68,99 @@ pub fn View() -> impl IntoView {
             )>
                 <ChartCanvas width={W} height={H} builder={build} />
             </div>
+            <MapLibreGeoLab />
         </section>
     }
 }
+
+#[component]
+fn MapLibreGeoLab() -> impl IntoView {
+    view! {
+        <div class="maplibre-lab">
+            <div class="maplibre-lab-head">
+                <div>
+                    <h3>"MapLibre layer options"</h3>
+                    <p>"Interactive vector map variants using the same district, route, and site data as the chart spec."</p>
+                </div>
+                <div class="maplibre-mode-controls" aria-label="MapLibre map options">
+                    {MAPLIBRE_MODES
+                        .iter()
+                        .map(|mode| {
+                            let class = if mode.id == "choropleth" {
+                                "maplibre-option-button is-active"
+                            } else {
+                                "maplibre-option-button"
+                            };
+                            let pressed = if mode.id == "choropleth" { "true" } else { "false" };
+                            view! {
+                                <button
+                                    type="button"
+                                    class=class
+                                    aria-pressed=pressed
+                                    data-maplibre-target="geo-maplibre-demo"
+                                    data-maplibre-mode=mode.id
+                                >
+                                    <strong>{mode.label}</strong>
+                                    <span>{mode.detail}</span>
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+            </div>
+            <div class="maplibre-shell">
+                <div
+                    id="geo-maplibre-demo"
+                    class="maplibre-frame"
+                    data-maplibre-map="geo-options"
+                    data-maplibre-mode="choropleth"
+                    role="region"
+                    aria-label="MapLibre geo options demo"
+                ></div>
+            </div>
+        </div>
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MapLibreMode {
+    id: &'static str,
+    label: &'static str,
+    detail: &'static str,
+}
+
+const MAPLIBRE_MODES: &[MapLibreMode] = &[
+    MapLibreMode {
+        id: "choropleth",
+        label: "Choropleth",
+        detail: "value fills",
+    },
+    MapLibreMode {
+        id: "regions",
+        label: "Regions",
+        detail: "category fills",
+    },
+    MapLibreMode {
+        id: "bubbles",
+        label: "Bubbles",
+        detail: "scaled sites",
+    },
+    MapLibreMode {
+        id: "routes",
+        label: "Routes",
+        detail: "network focus",
+    },
+    MapLibreMode {
+        id: "heat",
+        label: "Heat",
+        detail: "demand density",
+    },
+    MapLibreMode {
+        id: "extrusion",
+        label: "3D",
+        detail: "index height",
+    },
+];
 
 fn demo_geo_spec() -> GeoMapSpec {
     let options = GeoJsonReadOptions {

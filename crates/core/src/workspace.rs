@@ -1,4 +1,4 @@
-//! Workspace: shared state that multiple [`Chart`]s can subscribe to.
+//! Workspace: shared state that multiple [`crate::Chart`]s can subscribe to.
 //!
 //! A workspace owns:
 //!

@@ -22,7 +22,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/berthacharts/berthacharts"
 authors = ["Bertha Charts Contributors"]
-rust-version = "1.85"
+rust-version = "1.88"
 readme = "README.md"
 
 [workspace.dependencies]

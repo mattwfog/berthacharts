@@ -4,13 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bertha Charts — Gallery</title>
+  <script>
+    if (window.location.protocol === "file:") {
+      window.location.replace("http://127.0.0.1:8796/#geospatial-map");
+    }
+  </script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.css" />
   <link data-trunk rel="rust" data-bin="berthacharts-leptos-gallery" data-wasm-opt="0" />
   <link data-trunk rel="css" href="style.css" />
   <link data-trunk rel="copy-file" href="three_charts.js" />
+  <link data-trunk rel="copy-file" href="maplibre_geo.js" />
   <link data-trunk rel="copy-dir" href="vendor" />
+  <script src="https://unpkg.com/maplibre-gl@5.23.0/dist/maplibre-gl.js"></script>
   <script type="module" src="three_charts.js"></script>
+  <script type="module" src="maplibre_geo.js?v=2"></script>
 </head>
 <body>
+  <p class="file-open-help">
+    This gallery must be opened through the local server, not directly as a file.
+  </p>
   <noscript>This gallery requires JavaScript (and WebGL2) to render charts.</noscript>
 </body>
 </html>

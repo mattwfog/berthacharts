@@ -14,39 +14,37 @@ berthacharts-core = { workspace = true }
 berthacharts-charts = { workspace = true, optional = true }
 berthacharts-transforms = { workspace = true, optional = true }
 berthacharts-stats = { workspace = true, optional = true }
-berthacharts-dist = { workspace = true, optional = true }
-berthacharts-finance = { workspace = true, optional = true }
 berthacharts-geo = { workspace = true, optional = true }
 berthacharts-network = { workspace = true, optional = true }
-berthacharts-anno = { workspace = true, optional = true }
 berthacharts-renderer-wgpu = { workspace = true, optional = true }
 berthacharts-leptos = { workspace = true, optional = true }
-berthacharts-bindings-react = { workspace = true, optional = true }
 
 [features]
 default = ["charts", "transforms"]
 charts = ["dep:berthacharts-charts"]
 transforms = ["dep:berthacharts-transforms"]
 stats = ["dep:berthacharts-stats"]
-distribution = ["dep:berthacharts-dist"]
-finance = ["dep:berthacharts-finance"]
 geo = ["dep:berthacharts-geo"]
 network = ["dep:berthacharts-network"]
-annotations = ["dep:berthacharts-anno"]
 renderer-wgpu = ["dep:berthacharts-renderer-wgpu"]
 leptos = ["renderer-wgpu", "dep:berthacharts-leptos"]
-react = ["renderer-wgpu", "dep:berthacharts-bindings-react"]
 full = [
     "charts",
     "transforms",
     "stats",
-    "distribution",
-    "finance",
     "geo",
     "network",
-    "annotations",
     "renderer-wgpu",
+    "leptos",
 ]
+
+[[example]]
+name = "basic"
+required-features = ["charts"]
+
+[[example]]
+name = "multiple_charts"
+required-features = ["charts"]
 
 [[example]]
 name = "network"

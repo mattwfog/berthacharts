@@ -13,6 +13,8 @@ pub mod markov_churn;
 pub mod planning_workspace;
 pub mod sankey;
 pub mod scatter_plot;
+pub mod state_space_frameworks;
+pub mod state_space_models;
 pub mod sunburst;
 pub mod thompson_sampling;
 pub mod three_d;

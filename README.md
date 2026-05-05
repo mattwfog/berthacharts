@@ -1,8 +1,8 @@
 # Bertha Charts
 
 A WebGL chart kernel for Rust and the web. Foundational primitives for
-sophisticated, analytically-deep data visualization — consumable from React
-(via WASM) and Leptos (natively).
+sophisticated, analytically-deep data visualization, consumable from Rust and
+Leptos applications.
 
 **Status:** v0.0.1 — pre-release. Core kernel, wgpu renderer, and a starter
 set of reusable chart specs are implemented. Public traits are not yet stable.
@@ -10,6 +10,13 @@ set of reusable chart specs are implemented. Public traits are not yet stable.
 ## Quick Start
 
 Use the facade crate for application code:
+
+```toml
+[dependencies]
+berthacharts = "0.0.1"
+```
+
+When working from this repository instead of crates.io, use the local facade:
 
 ```toml
 [dependencies]
@@ -33,9 +40,9 @@ assert!(!chart.scene().layers.is_empty());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Default features include `charts` and `transforms`. Optional feature flags are
-available for `stats`, `distribution`, `finance`, `geo`, `network`,
-`annotations`, `renderer-wgpu`, `leptos`, and `react`.
+Default features include `charts` and `transforms`. Optional feature flags for
+the initial public release are `stats`, `geo`, `network`, `renderer-wgpu`, and
+`leptos`.
 
 Runnable examples:
 
@@ -68,13 +75,15 @@ let chart = BarChartSpec::new(vec![BarDatum::new("A", 1.0)])
   (bar, line, scatter, heatmap) built on the core trait surface.
 - **Network** (`berthacharts-network`) — graph charts and layouts. Sankey
   ships first; force-directed / chord / tree layouts later.
-- **Domain crates** (`transforms`, `stats`, `dist`, `finance`, `anno`) —
-  opt-in domain logic. Each implements `Transform` / `Mark` from core. Slots
-  reserved at v0.0.1; seed implementations land in v0.1.x.
+- **Domain crates** (`transforms`, `stats`, `geo`, `network`) — opt-in domain
+  logic built on the core trait surface.
 - **Renderer** (`renderer-wgpu`) — wgpu backend targeting WebGL2 on the web
   and native elsewhere.
-- **Bindings** — `berthacharts-leptos` (Rust-native) and
-  `berthacharts-bindings-react` (WASM + TS). Slots reserved at v0.0.1.
+- **Bindings** — `berthacharts-leptos` provides Rust-native Leptos bindings.
+
+Incubating crates for annotations, distribution marks, finance charts, and
+React bindings are kept private in this repository until they have usable
+public APIs.
 
 A working Leptos example wiring core → renderer → DOM lives under
 `examples/leptos-gallery/`.
@@ -95,15 +104,19 @@ A working Leptos example wiring core → renderer → DOM lives under
 
 ```sh
 cargo check --workspace
+cargo clippy --workspace --all-targets
 cargo test --workspace
 cargo test -p berthacharts
 cargo test -p berthacharts --features network,geo,stats
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 ```
 
 `cargo package -p berthacharts` requires the leaf crates
-(`berthacharts-core`, `berthacharts-charts`, `berthacharts-transforms`, etc.)
-to be published first, because Cargo resolves facade dependencies through the
-registry during package verification.
+(`berthacharts-core`, `berthacharts-charts`, `berthacharts-transforms`,
+`berthacharts-stats`, `berthacharts-geo`, `berthacharts-network`,
+`berthacharts-renderer-wgpu`, and `berthacharts-leptos`) to be published
+first, because Cargo resolves facade dependencies through the registry during
+package verification. See `RELEASE.md` for the publish order.
 
 The Leptos gallery is built with [Trunk](https://trunkrs.dev/):
 

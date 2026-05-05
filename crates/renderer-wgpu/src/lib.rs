@@ -1132,7 +1132,7 @@ fn push_line(line: &LinePrim, out: &mut Vec<TriangleVertex>) {
             if dash_remaining <= f32::EPSILON {
                 dash_index = (dash_index + 1) % pattern.len();
                 dash_remaining = pattern[dash_index];
-                drawing = dash_index % 2 == 0;
+                drawing = dash_index.is_multiple_of(2);
             }
         }
     }

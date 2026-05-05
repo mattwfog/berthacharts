@@ -4,17 +4,22 @@
 //! want a stable import path for application code:
 //!
 //! ```
-//! use berthacharts::prelude::*;
+//! #[cfg(feature = "charts")]
+//! {
+//!     use berthacharts::prelude::*;
 //!
-//! let spec = BarChartSpec::new(vec![
-//!     BarDatum::new("Q1", 42.0),
-//!     BarDatum::new("Q2", 57.0),
-//! ]);
-//! let chart = spec.build(ChartSize::new(640, 360));
-//! assert!(chart.is_ok());
+//!     let spec = BarChartSpec::new(vec![
+//!         BarDatum::new("Q1", 42.0),
+//!         BarDatum::new("Q2", 57.0),
+//!     ]);
+//!     let chart = spec.build(ChartSize::new(640, 360));
+//!     assert!(chart.is_ok());
+//! }
 //! ```
 //!
-//! Advanced users can still depend on the leaf crates directly.
+//! Advanced users can still depend on the leaf crates directly. The initial
+//! public facade only exposes implemented crates; incubating crates stay out
+//! of the feature surface until they have usable APIs.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -45,18 +50,6 @@ pub mod stats {
     pub use berthacharts_stats::*;
 }
 
-/// Distribution chart marks and transforms.
-#[cfg(feature = "distribution")]
-pub mod distribution {
-    pub use berthacharts_dist::*;
-}
-
-/// Finance-specific helpers and chart primitives.
-#[cfg(feature = "finance")]
-pub mod finance {
-    pub use berthacharts_finance::*;
-}
-
 /// Geospatial charts, maps, projections, and GeoJSON helpers.
 #[cfg(feature = "geo")]
 pub mod geo {
@@ -69,12 +62,6 @@ pub mod network {
     pub use berthacharts_network::*;
 }
 
-/// Annotation helpers.
-#[cfg(feature = "annotations")]
-pub mod annotations {
-    pub use berthacharts_anno::*;
-}
-
 /// wgpu renderer backend.
 #[cfg(feature = "renderer-wgpu")]
 pub mod renderer_wgpu {
@@ -85,12 +72,6 @@ pub mod renderer_wgpu {
 #[cfg(feature = "leptos")]
 pub mod leptos {
     pub use berthacharts_leptos::*;
-}
-
-/// React/WASM bindings.
-#[cfg(feature = "react")]
-pub mod react {
-    pub use berthacharts_bindings_react::*;
 }
 
 /// Convenience methods for any [`ChartSpec`].

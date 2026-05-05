@@ -1,7 +1,17 @@
 //! Downstream-style smoke tests for the facade crate.
 
+#[cfg(any(feature = "charts", feature = "network", feature = "geo"))]
 use berthacharts::prelude::*;
 
+#[test]
+fn root_exports_core_chart_size() {
+    let viewport = berthacharts::ChartSize::new(320, 240).full_viewport();
+
+    assert_eq!(viewport.width, 320);
+    assert_eq!(viewport.height, 240);
+}
+
+#[cfg(feature = "charts")]
 #[test]
 fn prelude_builds_a_bar_chart() {
     let spec = BarChartSpec::new(vec![
@@ -25,6 +35,7 @@ fn prelude_builds_a_bar_chart() {
     assert!(!chart.snap_targets().is_empty());
 }
 
+#[cfg(feature = "charts")]
 #[test]
 fn namespaced_imports_build_a_scatter_plot() {
     let spec = berthacharts::charts::ScatterPlotSpec::new(vec![
@@ -44,6 +55,7 @@ fn namespaced_imports_build_a_scatter_plot() {
     assert_eq!(chart.scene().layers.len(), 1);
 }
 
+#[cfg(feature = "charts")]
 #[test]
 fn root_exports_build_a_line_chart() {
     let chart = berthacharts::LineChartSpec::new(vec![
