@@ -13,6 +13,7 @@
 //!   chart.destroy();
 
 #![forbid(unsafe_code)]
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 use std::sync::Arc;
 
@@ -20,11 +21,16 @@ use berthacharts_charts::{
     BarChartOptions, BarChartSpec, BarDatum, HeatmapCell, HeatmapOptions, HeatmapSpec,
     LineChartOptions, LineChartSpec, LineDatum, ScatterDatum, ScatterPlotOptions, ScatterPlotSpec,
 };
-use berthacharts_core::{ChartSize, ChartSpec, Workspace};
+#[cfg(target_arch = "wasm32")]
+use berthacharts_core::{ChartSize, ChartSpec};
+use berthacharts_core::Workspace;
 use berthacharts_renderer_wgpu::Renderer;
 use serde::Deserialize;
+
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
 fn dpr() -> f32 {
     web_sys::window()
         .map(|w| w.device_pixel_ratio() as f32)
@@ -32,12 +38,13 @@ fn dpr() -> f32 {
         .clamp(1.0, 3.0)
 }
 
+#[cfg(target_arch = "wasm32")]
 fn physical(logical: u32, dpr: f32) -> u32 {
     ((logical as f32) * dpr).round().max(1.0) as u32
 }
 
 /// Opaque chart handle exposed to JS.
-#[wasm_bindgen]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct BerthaChart {
     renderer: Renderer,
     workspace: Arc<Workspace>,
@@ -45,6 +52,7 @@ pub struct BerthaChart {
     logical_h: u32,
 }
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl BerthaChart {
     /// Initialize a chart renderer on a canvas element.
