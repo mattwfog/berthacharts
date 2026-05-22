@@ -160,10 +160,14 @@ dependencies = [
 name = "berthacharts-bindings-react"
 version = "0.0.1"
 dependencies = [
+ "berthacharts-charts",
  "berthacharts-core",
  "berthacharts-renderer-wgpu",
  "js-sys",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

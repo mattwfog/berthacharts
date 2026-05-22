@@ -21,9 +21,9 @@ use berthacharts_charts::{
     BarChartOptions, BarChartSpec, BarDatum, HeatmapCell, HeatmapOptions, HeatmapSpec,
     LineChartOptions, LineChartSpec, LineDatum, ScatterDatum, ScatterPlotOptions, ScatterPlotSpec,
 };
+use berthacharts_core::Workspace;
 #[cfg(target_arch = "wasm32")]
 use berthacharts_core::{ChartSize, ChartSpec};
-use berthacharts_core::Workspace;
 use berthacharts_renderer_wgpu::Renderer;
 use serde::Deserialize;
 
@@ -68,15 +68,10 @@ impl BerthaChart {
         canvas.set_width(pw);
         canvas.set_height(ph);
 
-        let renderer = Renderer::new_for_canvas_with_logical(
-            canvas,
-            pw,
-            ph,
-            width as f32,
-            height as f32,
-        )
-        .await
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let renderer =
+            Renderer::new_for_canvas_with_logical(canvas, pw, ph, width as f32, height as f32)
+                .await
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         Ok(BerthaChart {
             renderer,
