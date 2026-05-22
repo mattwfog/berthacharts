@@ -9,6 +9,7 @@
 //!   chart.line(jsonString);     // LineSpec JSON
 //!   chart.scatter(jsonString);  // ScatterSpec JSON
 //!   chart.heatmap(jsonString);  // HeatmapSpec JSON
+//!   chart.guides();             // → JSON of axes, labels, legend
 //!   chart.resize(800, 480);
 //!   chart.destroy();
 
@@ -25,7 +26,7 @@ use berthacharts_core::Workspace;
 #[cfg(target_arch = "wasm32")]
 use berthacharts_core::{ChartSize, ChartSpec};
 use berthacharts_renderer_wgpu::Renderer;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -50,6 +51,7 @@ pub struct BerthaChart {
     workspace: Arc<Workspace>,
     logical_w: u32,
     logical_h: u32,
+    last_guides: Option<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -78,7 +80,16 @@ impl BerthaChart {
             workspace: Workspace::new(),
             logical_w: width,
             logical_h: height,
+            last_guides: None,
         })
+    }
+
+    fn render_chart(&mut self, chart: &berthacharts_core::Chart) -> Result<(), JsValue> {
+        self.renderer
+            .render(chart)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.last_guides = Some(extract_guides(chart));
+        Ok(())
     }
 
     /// Render a bar chart from JSON.
@@ -91,9 +102,7 @@ impl BerthaChart {
         let chart = spec
             .build_chart(self.workspace.clone(), size)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        self.renderer
-            .render(&chart)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        self.render_chart(&chart)
     }
 
     /// Render a line chart from JSON.
@@ -106,9 +115,7 @@ impl BerthaChart {
         let chart = spec
             .build_chart(self.workspace.clone(), size)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        self.renderer
-            .render(&chart)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        self.render_chart(&chart)
     }
 
     /// Render a scatter plot from JSON.
@@ -121,9 +128,7 @@ impl BerthaChart {
         let chart = spec
             .build_chart(self.workspace.clone(), size)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        self.renderer
-            .render(&chart)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        self.render_chart(&chart)
     }
 
     /// Render a heatmap from JSON.
@@ -136,9 +141,14 @@ impl BerthaChart {
         let chart = spec
             .build_chart(self.workspace.clone(), size)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        self.renderer
-            .render(&chart)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        self.render_chart(&chart)
+    }
+
+    /// Return guide overlay data (axes, labels, legend) as JSON.
+    /// Call after bar/line/scatter/heatmap to get the DOM overlay data.
+    #[wasm_bindgen]
+    pub fn guides(&self) -> Option<String> {
+        self.last_guides.clone()
     }
 
     /// Resize the renderer.
@@ -163,9 +173,169 @@ impl BerthaChart {
 }
 
 // ---------------------------------------------------------------------------
+// Guide extraction — serialize scene guides into a JS-friendly JSON shape.
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct GuidesOutput {
+    axes: Vec<AxisOutput>,
+    labels: Vec<LabelOutput>,
+    legend: Option<LegendOutput>,
+    plot_area: PlotAreaOutput,
+}
+
+#[derive(Serialize)]
+struct PlotAreaOutput {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+#[derive(Serialize)]
+struct AxisOutput {
+    orient: &'static str,
+    label: Option<String>,
+    ticks: Vec<TickOutput>,
+}
+
+#[derive(Serialize)]
+struct TickOutput {
+    position: f32,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct LabelOutput {
+    x: f32,
+    y: f32,
+    text: String,
+    detail: Option<String>,
+    anchor: &'static str,
+}
+
+#[derive(Serialize)]
+struct LegendOutput {
+    title: Option<String>,
+    anchor: &'static str,
+    items: Vec<LegendItemOutput>,
+}
+
+#[derive(Serialize)]
+struct LegendItemOutput {
+    label: String,
+    color: String,
+}
+
+fn extract_guides(chart: &berthacharts_core::Chart) -> String {
+    let scene = chart.scene();
+    let workspace = chart.workspace();
+    let scales = workspace.scales();
+    let plot = scene.viewport.plot_area;
+
+    let mut axes = Vec::new();
+    let mut labels = Vec::new();
+    let mut legend = None;
+
+    for guide in &scene.guides {
+        match guide {
+            berthacharts_core::Guide::Axis(ag) => {
+                let orient = match ag.orient {
+                    berthacharts_core::AxisOrient::Top => "top",
+                    berthacharts_core::AxisOrient::Right => "right",
+                    berthacharts_core::AxisOrient::Bottom => "bottom",
+                    berthacharts_core::AxisOrient::Left => "left",
+                    _ => "bottom",
+                };
+                let ticks = if let Some(scale) = scales.get(ag.scale) {
+                    scale
+                        .ticks(ag.tick_count)
+                        .into_iter()
+                        .map(|t| TickOutput {
+                            position: t.position,
+                            label: t.label,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                axes.push(AxisOutput {
+                    orient,
+                    label: ag.label.clone(),
+                    ticks,
+                });
+            }
+            berthacharts_core::Guide::Labels(lg) => {
+                for item in &lg.items {
+                    let anchor = match item.anchor {
+                        berthacharts_core::LabelAnchor::Center => "center",
+                        berthacharts_core::LabelAnchor::Top => "top",
+                        berthacharts_core::LabelAnchor::Bottom => "bottom",
+                        berthacharts_core::LabelAnchor::Left => "left",
+                        berthacharts_core::LabelAnchor::Right => "right",
+                        _ => "center",
+                    };
+                    labels.push(LabelOutput {
+                        x: item.x,
+                        y: item.y,
+                        text: item.text.clone(),
+                        detail: item.detail.clone(),
+                        anchor,
+                    });
+                }
+            }
+            berthacharts_core::Guide::Legend(lg) => {
+                let anchor = match lg.anchor {
+                    berthacharts_core::LegendAnchor::Top => "top",
+                    berthacharts_core::LegendAnchor::Bottom => "bottom",
+                    berthacharts_core::LegendAnchor::TopLeft => "top-left",
+                    _ => "bottom",
+                };
+                legend = Some(LegendOutput {
+                    title: lg.title.clone(),
+                    anchor,
+                    items: lg
+                        .items
+                        .iter()
+                        .map(|i| LegendItemOutput {
+                            label: i.label.clone(),
+                            color: rgba_to_css(i.color),
+                        })
+                        .collect(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let output = GuidesOutput {
+        axes,
+        labels,
+        legend,
+        plot_area: PlotAreaOutput {
+            x: plot.x,
+            y: plot.y,
+            w: plot.w,
+            h: plot.h,
+        },
+    };
+    serde_json::to_string(&output).unwrap_or_default()
+}
+
+fn rgba_to_css(c: [f32; 4]) -> String {
+    let a = c[3].max(0.001);
+    let r = ((c[0] / a).clamp(0.0, 1.0) * 255.0).round() as u8;
+    let g = ((c[1] / a).clamp(0.0, 1.0) * 255.0).round() as u8;
+    let b = ((c[2] / a).clamp(0.0, 1.0) * 255.0).round() as u8;
+    if (a - 1.0).abs() < 0.01 {
+        format!("rgb({r},{g},{b})")
+    } else {
+        format!("rgba({r},{g},{b},{:.2})", a)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // JSON input shapes — serde types at the WASM boundary.
-// These mirror the chart spec structs but are Deserialize-friendly with
-// sensible defaults so the JS caller only specifies what they care about.
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
