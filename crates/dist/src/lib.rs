@@ -11,16 +11,14 @@ pub mod boxplot;
 pub mod ecdf;
 pub mod violin;
 
-pub use berthacharts_core as core;
 pub use beeswarm::{
     BeeswarmError, BeeswarmGroup, BeeswarmGroupLayout, BeeswarmLayout, BeeswarmOptions,
     BeeswarmSpec, SwarmDot,
 };
+pub use berthacharts_core as core;
 pub use boxplot::{
     compute_stats, BoxPlotError, BoxPlotGroup, BoxPlotLayout, BoxPlotLayoutGroup, BoxPlotOptions,
     BoxPlotSpec, BoxPlotStats,
 };
 pub use ecdf::{EcdfError, EcdfLayout, EcdfOptions, EcdfSeries, EcdfSeriesLayout, EcdfSpec};
-pub use violin::{
-    ViolinError, ViolinGroup, ViolinLayout, ViolinOptions, ViolinShape, ViolinSpec,
-};
+pub use violin::{ViolinError, ViolinGroup, ViolinLayout, ViolinOptions, ViolinShape, ViolinSpec};
