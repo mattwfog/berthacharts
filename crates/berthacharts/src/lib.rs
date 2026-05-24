@@ -120,10 +120,11 @@ pub mod prelude {
 
     #[cfg(feature = "charts")]
     pub use crate::charts::{
-        BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, HeatmapCell,
-        HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError,
+        BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, DotMode,
+        HeatmapCell, HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError,
         LineChartOptions, LineChartSpec, LineChartSummary, LineDatum, ScatterDatum,
-        ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary,
+        ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary, SparklineDatum,
+        SparklineError, SparklineOptions, SparklineSpec,
     };
 
     #[cfg(feature = "transforms")]
@@ -170,10 +171,11 @@ pub mod prelude {
 
 #[cfg(feature = "charts")]
 pub use berthacharts_charts::{
-    BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, HeatmapCell,
+    BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell,
     HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
     LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions,
-    ScatterPlotSpec, ScatterPlotSummary,
+    ScatterPlotSpec, ScatterPlotSummary, SparklineDatum, SparklineError, SparklineOptions,
+    SparklineSpec,
 };
 pub use berthacharts_core::{
     Chart, ChartError, ChartSize, ChartSpec, Dataset, DatasetId, Guide, Mark, Rect, Scene,
