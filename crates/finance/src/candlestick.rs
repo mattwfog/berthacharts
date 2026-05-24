@@ -205,7 +205,10 @@ impl fmt::Display for CandlestickError {
         match self {
             Self::Empty => write!(f, "candlestick spec has no candles"),
             Self::InvariantViolation(i) => {
-                write!(f, "candle at index {i} violates OHLC invariants (e.g. low > high)")
+                write!(
+                    f,
+                    "candle at index {i} violates OHLC invariants (e.g. low > high)"
+                )
             }
         }
     }
@@ -225,7 +228,10 @@ impl ChartSpec for CandlestickSpec {
             return Err(CandlestickError::Empty);
         }
         for (i, c) in self.candles.iter().enumerate() {
-            if c.low > c.high || c.open < c.low || c.open > c.high || c.close < c.low
+            if c.low > c.high
+                || c.open < c.low
+                || c.open > c.high
+                || c.close < c.low
                 || c.close > c.high
             {
                 return Err(CandlestickError::InvariantViolation(i));
@@ -691,23 +697,33 @@ mod tests {
 
     #[test]
     fn empty_spec_rejected() {
-        let result = CandlestickSpec::new(vec![])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let result = CandlestickSpec::new(vec![]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(result, Err(CandlestickError::Empty)));
     }
 
     #[test]
     fn invariant_violation_rejected() {
         let bad = vec![Candle::new(0, 10.0, 5.0, 12.0, 8.0)]; // high < low
-        let result = CandlestickSpec::new(bad)
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
-        assert!(matches!(result, Err(CandlestickError::InvariantViolation(0))));
+        let result = CandlestickSpec::new(bad).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
+        assert!(matches!(
+            result,
+            Err(CandlestickError::InvariantViolation(0))
+        ));
     }
 
     #[test]
     fn candlestick_builds() {
         let chart = CandlestickSpec::new(sample_candles(20))
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(800, 400))
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(800, 400),
+            )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
     }
@@ -719,7 +735,10 @@ mod tests {
                 style: CandleStyle::OhlcBars,
                 ..CandlestickOptions::default()
             })
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(800, 400))
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(800, 400),
+            )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
     }

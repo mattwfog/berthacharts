@@ -208,11 +208,8 @@ impl ChartSpec for BoxPlotSpec {
         workspace.upsert_dataset(group_dataset(&layout));
         workspace.upsert_dataset(outlier_dataset(&layout));
 
-        let box_mark: Arc<dyn Mark> = Arc::new(BoxMark::new(
-            BOX_MARK,
-            layout.clone(),
-            self.options,
-        ));
+        let box_mark: Arc<dyn Mark> =
+            Arc::new(BoxMark::new(BOX_MARK, layout.clone(), self.options));
         let outlier_mark: Arc<dyn Mark> = Arc::new(OutlierMark::new(
             OUTLIER_MARK,
             layout.clone(),
@@ -288,11 +285,7 @@ fn percentile(sorted: &[f32], q: f32) -> f32 {
     sorted[lo] * (1.0 - frac) + sorted[hi] * frac
 }
 
-fn compute_layout(
-    groups: &[BoxPlotGroup],
-    options: &BoxPlotOptions,
-    plot: Rect,
-) -> BoxPlotLayout {
+fn compute_layout(groups: &[BoxPlotGroup], options: &BoxPlotOptions, plot: Rect) -> BoxPlotLayout {
     let n = groups.len();
     let pad = options.padding;
     let inner = Rect::new(
@@ -560,11 +553,7 @@ struct OutlierMark {
 
 impl OutlierMark {
     fn new(id: MarkId, layout: BoxPlotLayout, radius: f32) -> Self {
-        Self {
-            id,
-            layout,
-            radius,
-        }
+        Self { id, layout, radius }
     }
 }
 
@@ -624,7 +613,12 @@ impl Mark for OutlierMark {
             return Rect::new(0.0, 0.0, 0.0, 0.0);
         }
         let pad = self.radius * 2.0;
-        Rect::new(min_x - pad, min_y - pad, max_x - min_x + 2.0 * pad, max_y - min_y + 2.0 * pad)
+        Rect::new(
+            min_x - pad,
+            min_y - pad,
+            max_x - min_x + 2.0 * pad,
+            max_y - min_y + 2.0 * pad,
+        )
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -638,15 +632,19 @@ mod tests {
 
     #[test]
     fn empty_spec_rejected() {
-        let result = BoxPlotSpec::new(vec![])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let result = BoxPlotSpec::new(vec![]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(result, Err(BoxPlotError::Empty)));
     }
 
     #[test]
     fn empty_group_rejected() {
-        let result = BoxPlotSpec::new(vec![BoxPlotGroup::new("a", vec![])])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let result = BoxPlotSpec::new(vec![BoxPlotGroup::new("a", vec![])]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(result, Err(BoxPlotError::EmptyGroup(0))));
     }
 
@@ -661,7 +659,10 @@ mod tests {
     #[test]
     fn stats_separate_outliers() {
         // 1..10 has median ~5.5, IQR 5. 100 should be an outlier.
-        let v: Vec<f32> = (1..=10).map(|i| i as f32).chain(std::iter::once(100.0)).collect();
+        let v: Vec<f32> = (1..=10)
+            .map(|i| i as f32)
+            .chain(std::iter::once(100.0))
+            .collect();
         let s = compute_stats(&v, 1.5);
         assert!(s.outliers.contains(&100.0));
         assert!(s.upper_whisker < 100.0);
@@ -674,7 +675,10 @@ mod tests {
             BoxPlotGroup::new("B", (5..=25).map(|i| i as f32 * 1.2).collect()),
         ];
         let chart = BoxPlotSpec::new(groups)
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(600, 400))
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(600, 400),
+            )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
     }

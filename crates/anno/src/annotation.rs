@@ -386,8 +386,7 @@ impl AnnotationLayer {
                 let mx = (b.from[0] + b.to[0]) * 0.5;
                 let my = (b.from[1] + b.to[1]) * 0.5 - b.lift - 4.0;
                 items.push(
-                    LabelItem::new(mx, my, text.clone())
-                        .with_priority(LabelPriority::Important),
+                    LabelItem::new(mx, my, text.clone()).with_priority(LabelPriority::Important),
                 );
             }
         }
@@ -662,9 +661,7 @@ mod tests {
     #[test]
     fn bracket_label_surfaces_in_label_items() {
         let layer = AnnotationLayer::new(MarkId::new(1), Rect::new(0.0, 0.0, 400.0, 300.0))
-            .with_bracket(
-                StatBracket::new([10.0, 100.0], [50.0, 100.0]).with_label("p < 0.001"),
-            );
+            .with_bracket(StatBracket::new([10.0, 100.0], [50.0, 100.0]).with_label("p < 0.001"));
         let items = layer.label_items();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].text, "p < 0.001");

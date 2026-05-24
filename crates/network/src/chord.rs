@@ -263,9 +263,9 @@ impl ChartSpec for ChordSpec {
         if self.options.show_labels {
             let labels = build_labels(&layout, self.options.label_offset);
             if !labels.is_empty() {
-                scene
-                    .guides
-                    .push(Guide::Labels(LabelGuide::new(labels).with_collision_padding(3.0)));
+                scene.guides.push(Guide::Labels(
+                    LabelGuide::new(labels).with_collision_padding(3.0),
+                ));
             }
         }
 
@@ -454,12 +454,7 @@ fn arc_to_path(
     }
 }
 
-fn ribbon_to_path(
-    center: [f32; 2],
-    inner: f32,
-    ribbon: &ChordRibbon,
-    opacity: f32,
-) -> PathPrim {
+fn ribbon_to_path(center: [f32; 2], inner: f32, ribbon: &ChordRibbon, opacity: f32) -> PathPrim {
     // Bezier band from source arc to target arc through the centre.
     // Path: M src_start -> arc to src_end -> Q center -> target_end -> arc back -> Q center -> src_start
     let src_start = point_at(center, inner, ribbon.source_start);

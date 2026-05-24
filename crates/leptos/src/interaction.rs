@@ -2,12 +2,12 @@
 //!
 //! Three thin layers on top of the renderer-mount components:
 //!
-//! 1. [`canvas_local_coords`] — convert a browser PointerEvent into canvas-
+//! 1. `canvas_local_coords` — convert a browser PointerEvent into canvas-
 //!    local CSS pixels (matches the picker / mark coordinate system).
-//! 2. [`use_drag`] — Leptos hook that wires pointerdown/move/up on a canvas
+//! 2. `use_drag` — Leptos hook that wires pointerdown/move/up on a canvas
 //!    and emits drag state as signals.
-//! 3. [`interpolate_f32`] / [`interpolate_color`] / [`interpolate_point`] +
-//!    [`use_tween`] — interpolation primitives for animated transitions
+//! 3. `interpolate_f32` / `interpolate_color` / `interpolate_point` +
+//!    `use_tween` — interpolation primitives for animated transitions
 //!    between two chart states.
 
 #[cfg(target_arch = "wasm32")]
@@ -93,16 +93,18 @@ pub fn use_drag(canvas_ref: NodeRef<leptos::html::Canvas>) -> ReadSignal<DragSta
         // down
         let canvas_for_down = canvas.clone();
         let down = Closure::wrap(Box::new(move |evt: web_sys::PointerEvent| {
-            let (x, y) = canvas_local_coords(evt.client_x() as f64, evt.client_y() as f64, &canvas_for_down);
+            let (x, y) = canvas_local_coords(
+                evt.client_x() as f64,
+                evt.client_y() as f64,
+                &canvas_for_down,
+            );
             set_state.set(DragState {
                 phase: DragPhase::Active,
                 start: (x, y),
                 current: (x, y),
                 delta: (0.0, 0.0),
             });
-            let _ = canvas_for_down
-                .set_pointer_capture(evt.pointer_id())
-                .ok();
+            let _ = canvas_for_down.set_pointer_capture(evt.pointer_id()).ok();
         }) as Box<dyn FnMut(_)>);
 
         // move
@@ -141,22 +143,13 @@ pub fn use_drag(canvas_ref: NodeRef<leptos::html::Canvas>) -> ReadSignal<DragSta
             let _ = canvas_for_up.release_pointer_capture(evt.pointer_id()).ok();
         }) as Box<dyn FnMut(_)>);
 
-        let _ = canvas.add_event_listener_with_callback(
-            "pointerdown",
-            down.as_ref().unchecked_ref(),
-        );
-        let _ = canvas.add_event_listener_with_callback(
-            "pointermove",
-            move_handler.as_ref().unchecked_ref(),
-        );
-        let _ = canvas.add_event_listener_with_callback(
-            "pointerup",
-            up.as_ref().unchecked_ref(),
-        );
-        let _ = canvas.add_event_listener_with_callback(
-            "pointercancel",
-            up.as_ref().unchecked_ref(),
-        );
+        let _ =
+            canvas.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref());
+        let _ = canvas
+            .add_event_listener_with_callback("pointermove", move_handler.as_ref().unchecked_ref());
+        let _ = canvas.add_event_listener_with_callback("pointerup", up.as_ref().unchecked_ref());
+        let _ =
+            canvas.add_event_listener_with_callback("pointercancel", up.as_ref().unchecked_ref());
 
         closures.borrow_mut().push(down);
         closures.borrow_mut().push(move_handler);
@@ -234,7 +227,12 @@ impl Easing {
 /// On non-wasm builds returns a signal that immediately equals `target`.
 #[cfg(target_arch = "wasm32")]
 #[must_use]
-pub fn use_tween(start: f32, target: ReadSignal<f32>, duration_ms: f32, easing: Easing) -> ReadSignal<f32> {
+pub fn use_tween(
+    start: f32,
+    target: ReadSignal<f32>,
+    duration_ms: f32,
+    easing: Easing,
+) -> ReadSignal<f32> {
     use std::cell::RefCell;
     use std::rc::Rc;
     use wasm_bindgen::closure::Closure;
@@ -356,7 +354,12 @@ mod tests {
 
     #[test]
     fn easing_endpoints_pin() {
-        for ease in [Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::SmoothStep] {
+        for ease in [
+            Easing::Linear,
+            Easing::EaseIn,
+            Easing::EaseOut,
+            Easing::SmoothStep,
+        ] {
             assert!((ease.apply(0.0)).abs() < 1e-5);
             assert!((ease.apply(1.0) - 1.0).abs() < 1e-5);
         }

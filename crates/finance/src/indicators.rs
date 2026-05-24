@@ -166,7 +166,13 @@ pub fn macd(values: &[f32], fast: usize, slow: usize, signal: usize) -> Macd {
     let histogram: Vec<f32> = line
         .iter()
         .zip(signal_line.iter())
-        .map(|(m, s)| if m.is_finite() && s.is_finite() { m - s } else { f32::NAN })
+        .map(|(m, s)| {
+            if m.is_finite() && s.is_finite() {
+                m - s
+            } else {
+                f32::NAN
+            }
+        })
         .collect();
     Macd {
         macd: line,
@@ -351,7 +357,9 @@ mod tests {
 
     #[test]
     fn bollinger_bands_widen_with_volatility() {
-        let v: Vec<f32> = (0..20).map(|i| if i % 2 == 0 { 1.0 } else { 100.0 }).collect();
+        let v: Vec<f32> = (0..20)
+            .map(|i| if i % 2 == 0 { 1.0 } else { 100.0 })
+            .collect();
         let bb = bollinger_bands(&v, 5, 2.0);
         // Upper > mid > lower in the populated region.
         for i in 4..20 {

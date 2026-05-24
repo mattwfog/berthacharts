@@ -264,7 +264,10 @@ fn series_dataset(layout: &EcdfLayout) -> Dataset {
         SERIES_DATASET,
         1,
         vec![
-            ("series".to_string(), Column::I64(ColumnData::new(series_idx))),
+            (
+                "series".to_string(),
+                Column::I64(ColumnData::new(series_idx)),
+            ),
             ("x".to_string(), Column::F32(ColumnData::new(x))),
             ("y".to_string(), Column::F32(ColumnData::new(y))),
         ],
@@ -353,15 +356,19 @@ mod tests {
 
     #[test]
     fn empty_spec_rejected() {
-        let result =
-            EcdfSpec::new(vec![]).build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let result = EcdfSpec::new(vec![]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(result, Err(EcdfError::Empty)));
     }
 
     #[test]
     fn empty_series_rejected() {
-        let result = EcdfSpec::new(vec![EcdfSeries::new("a", vec![])])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let result = EcdfSpec::new(vec![EcdfSeries::new("a", vec![])]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(result, Err(EcdfError::EmptySeries(0))));
     }
 
@@ -395,7 +402,10 @@ mod tests {
             EcdfSeries::new("A", (1..=20).map(|i| i as f32).collect()),
             EcdfSeries::new("B", (5..=25).map(|i| i as f32 * 1.1).collect()),
         ])
-        .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(500, 400))
+        .build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(500, 400),
+        )
         .expect("chart");
         assert!(!chart.scene().layers.is_empty());
     }

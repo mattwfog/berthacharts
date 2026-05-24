@@ -20,10 +20,6 @@ pub use force::{
     EdgeStyle, ForceEdge, ForceError, ForceLayout, ForceLayoutEdge, ForceLayoutNode, ForceNode,
     ForceOptions, ForceSpec,
 };
-pub use tree::{
-    TreeEdge, TreeError, TreeLayout, TreeLayoutEdge, TreeLayoutNode, TreeNode, TreeOptions,
-    TreeOrientation, TreeSpec,
-};
 pub use sankey::{
     SankeyError, SankeyFlow, SankeyLayout, SankeyLayoutNode, SankeyLayoutStage, SankeyLegendItem,
     SankeyLink, SankeyNode, SankeyOptions, SankeyRibbon, SankeySpec, SankeyStage,
@@ -31,4 +27,8 @@ pub use sankey::{
 pub use sunburst::{
     SunburstBranchSummary, SunburstError, SunburstLayout, SunburstLegendItem, SunburstNode,
     SunburstOptions, SunburstPath, SunburstSector, SunburstSpec, SunburstSummary,
+};
+pub use tree::{
+    TreeEdge, TreeError, TreeLayout, TreeLayoutEdge, TreeLayoutNode, TreeNode, TreeOptions,
+    TreeOrientation, TreeSpec,
 };

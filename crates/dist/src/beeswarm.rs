@@ -176,8 +176,11 @@ impl ChartSpec for BeeswarmSpec {
         workspace.upsert_coord(COORD, Arc::new(CartesianCoord::new(X_SCALE, Y_SCALE)));
         workspace.upsert_dataset(group_dataset(&layout));
 
-        let mark: Arc<dyn Mark> =
-            Arc::new(BeeswarmMark::new(SWARM_MARK, layout.clone(), self.options.dot_radius));
+        let mark: Arc<dyn Mark> = Arc::new(BeeswarmMark::new(
+            SWARM_MARK,
+            layout.clone(),
+            self.options.dot_radius,
+        ));
         let mut scene = Scene::new(viewport);
         scene.layers.push(Layer {
             id: LAYER,
@@ -330,11 +333,7 @@ struct BeeswarmMark {
 
 impl BeeswarmMark {
     fn new(id: MarkId, layout: BeeswarmLayout, radius: f32) -> Self {
-        Self {
-            id,
-            layout,
-            radius,
-        }
+        Self { id, layout, radius }
     }
 }
 
@@ -423,15 +422,19 @@ mod tests {
 
     #[test]
     fn empty_spec_rejected() {
-        let r = BeeswarmSpec::new(vec![])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let r = BeeswarmSpec::new(vec![]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(r, Err(BeeswarmError::Empty)));
     }
 
     #[test]
     fn empty_group_rejected() {
-        let r = BeeswarmSpec::new(vec![BeeswarmGroup::new("a", vec![])])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let r = BeeswarmSpec::new(vec![BeeswarmGroup::new("a", vec![])]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(r, Err(BeeswarmError::EmptyGroup(0))));
     }
 
@@ -456,7 +459,10 @@ mod tests {
             BeeswarmGroup::new("B", (5..=35).map(|i| i as f32 * 1.1).collect()),
         ];
         let chart = BeeswarmSpec::new(groups)
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(600, 400))
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(600, 400),
+            )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
     }

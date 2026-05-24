@@ -254,7 +254,12 @@ impl ChartSpec for TreeSpec {
         workspace: Arc<Workspace>,
         size: ChartSize,
     ) -> Result<Chart, Self::Error> {
-        let layout = compute_layout(&self.nodes, &self.edges, &self.options, size.full_viewport().plot_area)?;
+        let layout = compute_layout(
+            &self.nodes,
+            &self.edges,
+            &self.options,
+            size.full_viewport().plot_area,
+        )?;
         let viewport = size.full_viewport();
 
         let x_scale: Arc<dyn Scale> = Arc::new(LinearScale::new(
@@ -276,8 +281,7 @@ impl ChartSpec for TreeSpec {
             layout.edges.clone(),
             self.options.edge_width,
         ));
-        let node_mark: Arc<dyn Mark> =
-            Arc::new(TreeNodeMark::new(NODE_MARK, layout.nodes.clone()));
+        let node_mark: Arc<dyn Mark> = Arc::new(TreeNodeMark::new(NODE_MARK, layout.nodes.clone()));
 
         let mut scene = Scene::new(viewport);
         scene.layers.push(Layer {
@@ -477,7 +481,9 @@ fn compute_layout(
 fn build_labels(layout: &TreeLayout, max_visible: Option<usize>) -> Vec<LabelItem> {
     let mut indices: Vec<usize> = (0..layout.nodes.len()).collect();
     indices.sort_by_key(|&i| layout.nodes[i].depth);
-    let take = max_visible.unwrap_or(layout.nodes.len()).min(layout.nodes.len());
+    let take = max_visible
+        .unwrap_or(layout.nodes.len())
+        .min(layout.nodes.len());
     indices.truncate(take);
     indices
         .into_iter()
@@ -749,10 +755,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_parent() {
-        let nodes = vec![
-            TreeNode::root("a", "A"),
-            TreeNode::child("b", "B", "ghost"),
-        ];
+        let nodes = vec![TreeNode::root("a", "A"), TreeNode::child("b", "B", "ghost")];
         let result = compute_layout(
             &nodes,
             &[],
@@ -802,10 +805,7 @@ mod tests {
 
     #[test]
     fn orientation_left_right_places_root_on_left() {
-        let nodes = vec![
-            TreeNode::root("r", "Root"),
-            TreeNode::child("c", "C", "r"),
-        ];
+        let nodes = vec![TreeNode::root("r", "Root"), TreeNode::child("c", "C", "r")];
         let layout = compute_layout(
             &nodes,
             &[],

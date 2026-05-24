@@ -660,7 +660,11 @@ impl Mark for ForceNodeMark {
             points.push(PointPrim {
                 x: n.x,
                 y: n.y,
-                r: if n.highlighted { n.radius * 1.15 } else { n.radius },
+                r: if n.highlighted {
+                    n.radius * 1.15
+                } else {
+                    n.radius
+                },
                 shape: 0,
                 fill,
                 stroke,
@@ -1025,7 +1029,9 @@ fn build_labels(layout: &ForceLayout, max_visible: Option<usize>) -> Vec<LabelIt
             .then(ai.cmp(bi))
     });
 
-    let take = max_visible.unwrap_or(layout.nodes.len()).min(layout.nodes.len());
+    let take = max_visible
+        .unwrap_or(layout.nodes.len())
+        .min(layout.nodes.len());
     ranked.truncate(take);
 
     ranked
@@ -1050,7 +1056,7 @@ struct BHNode {
     com_x: f32,
     com_y: f32,
     mass: f32,
-    body: i32, // -1 = empty or internal; otherwise body index
+    body: i32,          // -1 = empty or internal; otherwise body index
     children: [i32; 4], // -1 if absent
 }
 
@@ -1275,8 +1281,12 @@ mod tests {
     #[test]
     fn barnes_hut_matches_naive_within_tolerance() {
         // small graph: BH with tight theta should ~ match O(n²) result direction.
-        let nodes: Vec<ForceNode> = (0..20).map(|i| ForceNode::new(format!("n{i}"), "")).collect();
-        let edges: Vec<ForceEdge> = (0..19).map(|i| ForceEdge::new(format!("n{i}"), format!("n{}", i + 1))).collect();
+        let nodes: Vec<ForceNode> = (0..20)
+            .map(|i| ForceNode::new(format!("n{i}"), ""))
+            .collect();
+        let edges: Vec<ForceEdge> = (0..19)
+            .map(|i| ForceEdge::new(format!("n{i}"), format!("n{}", i + 1)))
+            .collect();
         let plot = Rect::new(0.0, 0.0, 800.0, 600.0);
 
         let bh = simulate(
@@ -1319,7 +1329,9 @@ mod tests {
     #[test]
     fn labels_are_capped_at_max_visible() {
         let nodes: Vec<ForceNode> = (0..50)
-            .map(|i| ForceNode::new(format!("n{i}"), format!("node {i}")).with_radius(5.0 + i as f32))
+            .map(|i| {
+                ForceNode::new(format!("n{i}"), format!("node {i}")).with_radius(5.0 + i as f32)
+            })
             .collect();
         let layout = simulate(
             &nodes,

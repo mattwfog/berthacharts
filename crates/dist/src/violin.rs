@@ -211,11 +211,7 @@ fn gaussian_kde(values: &[f32], at: f32, bandwidth: f32) -> f32 {
     s * inv
 }
 
-fn compute_layout(
-    groups: &[ViolinGroup],
-    options: &ViolinOptions,
-    plot: Rect,
-) -> ViolinLayout {
+fn compute_layout(groups: &[ViolinGroup], options: &ViolinOptions, plot: Rect) -> ViolinLayout {
     let n = groups.len();
     let pad = options.padding;
     let inner = Rect::new(
@@ -251,7 +247,9 @@ fn compute_layout(
         .enumerate()
         .map(|(i, g)| {
             let center_x = inner.x + (i as f32 + 0.5) * slot;
-            let bw = options.bandwidth.unwrap_or_else(|| silverman_bandwidth(&g.values));
+            let bw = options
+                .bandwidth
+                .unwrap_or_else(|| silverman_bandwidth(&g.values));
             // Compute densities at resolution samples spanning the group's range.
             let g_min = g.values.iter().copied().fold(f32::INFINITY, f32::min);
             let g_max = g.values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
@@ -431,15 +429,19 @@ mod tests {
 
     #[test]
     fn empty_spec_rejected() {
-        let r = ViolinSpec::new(vec![])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let r = ViolinSpec::new(vec![]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(r, Err(ViolinError::Empty)));
     }
 
     #[test]
     fn empty_group_rejected() {
-        let r = ViolinSpec::new(vec![ViolinGroup::new("a", vec![])])
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(400, 300));
+        let r = ViolinSpec::new(vec![ViolinGroup::new("a", vec![])]).build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(400, 300),
+        );
         assert!(matches!(r, Err(ViolinError::EmptyGroup(0))));
     }
 
@@ -475,7 +477,10 @@ mod tests {
             ViolinGroup::new("B", (5..=35).map(|i| i as f32 * 0.9).collect()),
         ];
         let chart = ViolinSpec::new(groups)
-            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(600, 400))
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(600, 400),
+            )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
     }
