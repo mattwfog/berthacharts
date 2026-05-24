@@ -62,6 +62,24 @@ pub mod network {
     pub use berthacharts_network::*;
 }
 
+/// Annotation primitives — reference lines, bands, arrows.
+#[cfg(feature = "anno")]
+pub mod anno {
+    pub use berthacharts_anno::*;
+}
+
+/// Distribution marks — boxplot, ECDF.
+#[cfg(feature = "dist")]
+pub mod dist {
+    pub use berthacharts_dist::*;
+}
+
+/// Finance domain — candlestick / OHLC + indicators (MA, EMA, Bollinger, RSI).
+#[cfg(feature = "finance")]
+pub mod finance {
+    pub use berthacharts_finance::*;
+}
+
 /// wgpu renderer backend.
 #[cfg(feature = "renderer-wgpu")]
 pub mod renderer_wgpu {
@@ -119,9 +137,28 @@ pub mod prelude {
 
     #[cfg(feature = "network")]
     pub use crate::network::{
-        SankeyError, SankeyFlow, SankeyLegendItem, SankeyLink, SankeyNode, SankeyOptions,
-        SankeySpec, SankeyStage, SunburstError, SunburstLegendItem, SunburstNode, SunburstOptions,
-        SunburstPath, SunburstSpec,
+        ChordError, ChordLink, ChordNode, ChordOptions, ChordSpec, EdgeStyle, ForceEdge,
+        ForceError, ForceNode, ForceOptions, ForceSpec, SankeyError, SankeyFlow, SankeyLegendItem,
+        SankeyLink, SankeyNode, SankeyOptions, SankeySpec, SankeyStage, SunburstError,
+        SunburstLegendItem, SunburstNode, SunburstOptions, SunburstPath, SunburstSpec, TreeEdge,
+        TreeError, TreeNode, TreeOptions, TreeOrientation, TreeSpec,
+    };
+
+    #[cfg(feature = "anno")]
+    pub use crate::anno::{
+        AnnotationLayer, Arrow, AxisRef, BandAxis, ReferenceBand, ReferenceLine,
+    };
+
+    #[cfg(feature = "dist")]
+    pub use crate::dist::{
+        BoxPlotError, BoxPlotGroup, BoxPlotOptions, BoxPlotSpec, BoxPlotStats, EcdfError,
+        EcdfOptions, EcdfSeries, EcdfSpec,
+    };
+
+    #[cfg(feature = "finance")]
+    pub use crate::finance::{
+        bollinger_bands, exponential_moving_average, moving_average, rsi, BollingerBands, Candle,
+        CandleStyle, CandlestickError, CandlestickOptions, CandlestickSpec, Overlay,
     };
 
     #[cfg(feature = "stats")]

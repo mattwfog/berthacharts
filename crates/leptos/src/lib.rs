@@ -28,5 +28,10 @@ pub use berthacharts_core as core;
 pub use berthacharts_renderer_wgpu as renderer;
 
 mod chart;
+pub mod interaction;
 
 pub use chart::{browser_device_pixel_ratio, mount_renderer, physical_px, BuildChart, ChartCanvas};
+pub use interaction::{
+    interpolate_color, interpolate_f32, interpolate_point, use_drag, use_tween, DragPhase,
+    DragState, Easing,
+};

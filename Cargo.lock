@@ -139,8 +139,11 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "berthacharts"
 version = "0.0.1"
 dependencies = [
+ "berthacharts-anno",
  "berthacharts-charts",
  "berthacharts-core",
+ "berthacharts-dist",
+ "berthacharts-finance",
  "berthacharts-geo",
  "berthacharts-leptos",
  "berthacharts-network",
@@ -160,10 +163,16 @@ dependencies = [
 name = "berthacharts-bindings-react"
 version = "0.0.1"
 dependencies = [
+ "berthacharts-charts",
  "berthacharts-core",
+ "berthacharts-network",
  "berthacharts-renderer-wgpu",
  "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -215,6 +224,7 @@ dependencies = [
  "berthacharts-renderer-wgpu",
  "leptos",
  "log",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
 ]
@@ -1933,6 +1943,17 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
