@@ -158,8 +158,9 @@ pub mod prelude {
 
     #[cfg(feature = "finance")]
     pub use crate::finance::{
-        bollinger_bands, exponential_moving_average, moving_average, rsi, BollingerBands, Candle,
-        CandleStyle, CandlestickError, CandlestickOptions, CandlestickSpec, Overlay,
+        atr, bollinger_bands, exponential_moving_average, ichimoku, macd, moving_average, obv, rsi,
+        stochastic, vwap, williams_r, BollingerBands, Candle, CandleStyle, CandlestickError,
+        CandlestickOptions, CandlestickSpec, Ichimoku, Macd, Overlay, Stochastic,
     };
 
     #[cfg(feature = "stats")]
