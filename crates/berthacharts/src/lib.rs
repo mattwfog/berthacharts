@@ -120,11 +120,12 @@ pub mod prelude {
 
     #[cfg(feature = "charts")]
     pub use crate::charts::{
-        BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, DotMode,
-        HeatmapCell, HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError,
-        LineChartOptions, LineChartSpec, LineChartSummary, LineDatum, ScatterDatum,
-        ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary, SparklineDatum,
-        SparklineError, SparklineOptions, SparklineSpec,
+        AreaChartError, AreaChartOptions, AreaChartSpec, AreaDatum, BarChartError, BarChartOptions,
+        BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell, HeatmapError,
+        HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
+        LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError,
+        ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary, SparklineDatum, SparklineError,
+        SparklineOptions, SparklineSpec, StackMode,
     };
 
     #[cfg(feature = "transforms")]
@@ -172,11 +173,11 @@ pub mod prelude {
 
 #[cfg(feature = "charts")]
 pub use berthacharts_charts::{
-    BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell,
-    HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
-    LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions,
-    ScatterPlotSpec, ScatterPlotSummary, SparklineDatum, SparklineError, SparklineOptions,
-    SparklineSpec,
+    AreaChartError, AreaChartOptions, AreaChartSpec, AreaDatum, BarChartError, BarChartOptions,
+    BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell, HeatmapError, HeatmapOptions,
+    HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions, LineChartSpec, LineChartSummary,
+    LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec,
+    ScatterPlotSummary, SparklineDatum, SparklineError, SparklineOptions, SparklineSpec, StackMode,
 };
 pub use berthacharts_core::{
     Chart, ChartError, ChartSize, ChartSpec, Dataset, DatasetId, Guide, Mark, Rect, Scene,
