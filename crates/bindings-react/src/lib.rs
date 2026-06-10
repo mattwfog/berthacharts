@@ -28,6 +28,8 @@ use berthacharts_core::{ChartSize, ChartSpec};
 use berthacharts_renderer_wgpu::Renderer;
 use serde::{Deserialize, Serialize};
 
+mod flows;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 

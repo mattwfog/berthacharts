@@ -162,6 +162,7 @@ version = "0.0.1"
 dependencies = [
  "berthacharts-charts",
  "berthacharts-core",
+ "berthacharts-network",
  "berthacharts-renderer-wgpu",
  "js-sys",
  "serde",
