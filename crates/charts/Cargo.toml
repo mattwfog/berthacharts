@@ -11,3 +11,4 @@ description = "Reusable chart specifications for Bertha Charts."
 
 [dependencies]
 berthacharts-core = { workspace = true }
+ahash = { workspace = true }

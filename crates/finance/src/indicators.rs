@@ -302,6 +302,100 @@ pub fn ichimoku(
     }
 }
 
+/// Stochastic oscillator output: `%K` (fast line) and `%D` (smoothed slow line).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stochastic {
+    /// `%K = 100 × (close - lowest_low) / (highest_high - lowest_low)` over the
+    /// last `k_window` periods.
+    pub k: Vec<f32>,
+    /// `%D` = `d_window`-period SMA of `%K`.
+    pub d: Vec<f32>,
+}
+
+/// Stochastic oscillator. Classic params: `k_window=14`, `d_window=3`.
+#[must_use]
+pub fn stochastic(
+    highs: &[f32],
+    lows: &[f32],
+    closes: &[f32],
+    k_window: usize,
+    d_window: usize,
+) -> Stochastic {
+    let n = highs.len();
+    let mut k = vec![f32::NAN; n];
+    if k_window == 0 || k_window > n || lows.len() != n || closes.len() != n {
+        return Stochastic {
+            k,
+            d: vec![f32::NAN; n],
+        };
+    }
+    for i in k_window - 1..n {
+        let mut hh = f32::NEG_INFINITY;
+        let mut ll = f32::INFINITY;
+        for j in (i + 1 - k_window)..=i {
+            if highs[j] > hh {
+                hh = highs[j];
+            }
+            if lows[j] < ll {
+                ll = lows[j];
+            }
+        }
+        let span = (hh - ll).max(f32::EPSILON);
+        k[i] = 100.0 * (closes[i] - ll) / span;
+    }
+    let d = moving_average(&k, d_window);
+    Stochastic { k, d }
+}
+
+/// Williams %R — like Stochastic %K but inverted to -100..0 range.
+/// Classic param: `window=14`.
+#[must_use]
+pub fn williams_r(highs: &[f32], lows: &[f32], closes: &[f32], window: usize) -> Vec<f32> {
+    let n = highs.len();
+    let mut out = vec![f32::NAN; n];
+    if window == 0 || window > n || lows.len() != n || closes.len() != n {
+        return out;
+    }
+    for i in window - 1..n {
+        let mut hh = f32::NEG_INFINITY;
+        let mut ll = f32::INFINITY;
+        for j in (i + 1 - window)..=i {
+            if highs[j] > hh {
+                hh = highs[j];
+            }
+            if lows[j] < ll {
+                ll = lows[j];
+            }
+        }
+        let span = (hh - ll).max(f32::EPSILON);
+        out[i] = -100.0 * (hh - closes[i]) / span;
+    }
+    out
+}
+
+/// On-Balance Volume (OBV). Cumulative running total of volume signed by
+/// price direction: add volume on up-close, subtract on down-close, hold on
+/// unchanged.
+#[must_use]
+pub fn obv(closes: &[f32], volumes: &[f32]) -> Vec<f32> {
+    let n = closes.len();
+    let mut out = vec![0.0_f32; n];
+    if n == 0 || volumes.len() != n {
+        return vec![f32::NAN; n];
+    }
+    for i in 1..n {
+        let dir = if closes[i] > closes[i - 1] {
+            1.0
+        } else if closes[i] < closes[i - 1] {
+            -1.0
+        } else {
+            0.0
+        };
+        out[i] = out[i - 1] + dir * volumes[i];
+    }
+    out
+}
+
 fn midrange(highs: &[f32], lows: &[f32], window: usize) -> Vec<f32> {
     let n = highs.len();
     let mut out = vec![f32::NAN; n];
@@ -421,6 +515,50 @@ mod tests {
         assert!(ich.senkou_b[51 + 26].is_finite());
         // Chikou shifted back
         assert!(ich.chikou[0].is_finite());
+    }
+
+    #[test]
+    fn stochastic_bounded_zero_to_hundred() {
+        let highs: Vec<f32> = (1..=20).map(|i| i as f32 + 1.0).collect();
+        let lows: Vec<f32> = (1..=20).map(|i| i as f32 - 1.0).collect();
+        let closes: Vec<f32> = (1..=20).map(|i| i as f32).collect();
+        let s = stochastic(&highs, &lows, &closes, 14, 3);
+        for &v in s.k.iter().filter(|v| v.is_finite()) {
+            assert!((0.0..=100.0).contains(&v));
+        }
+        // Steady up-trend → %K should sit in the upper half.
+        assert!(s.k[19] > 50.0);
+    }
+
+    #[test]
+    fn williams_r_in_minus_hundred_to_zero() {
+        let highs: Vec<f32> = (1..=20).map(|i| i as f32 + 1.0).collect();
+        let lows: Vec<f32> = (1..=20).map(|i| i as f32 - 1.0).collect();
+        let closes: Vec<f32> = (1..=20).map(|i| i as f32).collect();
+        let w = williams_r(&highs, &lows, &closes, 14);
+        for &v in w.iter().filter(|v| v.is_finite()) {
+            assert!((-100.0..=0.0).contains(&v));
+        }
+    }
+
+    #[test]
+    fn obv_accumulates_signed_volume() {
+        let closes = vec![10.0_f32, 11.0, 10.5, 12.0, 11.5];
+        let volumes = vec![100.0_f32, 200.0, 150.0, 300.0, 250.0];
+        let o = obv(&closes, &volumes);
+        // 100*0  + 200 (up) + (-150)(down) + 300(up) + (-250)(down)
+        // = 0 + 200 - 150 + 300 - 250 = 100
+        assert!((o[4] - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn obv_unchanged_close_holds_value() {
+        let closes = vec![10.0_f32, 10.0, 10.0];
+        let volumes = vec![100.0_f32, 200.0, 300.0];
+        let o = obv(&closes, &volumes);
+        assert_eq!(o[0], 0.0);
+        assert_eq!(o[1], 0.0);
+        assert_eq!(o[2], 0.0);
     }
 
     #[test]

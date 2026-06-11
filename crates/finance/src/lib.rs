@@ -30,6 +30,6 @@ pub use candlestick::{
     CandlestickSpec, Overlay, OverlayLine,
 };
 pub use indicators::{
-    atr, bollinger_bands, exponential_moving_average, ichimoku, macd, moving_average, rsi, vwap,
-    BollingerBands, Ichimoku, Macd,
+    atr, bollinger_bands, exponential_moving_average, ichimoku, macd, moving_average, obv, rsi,
+    stochastic, vwap, williams_r, BollingerBands, Ichimoku, Macd, Stochastic,
 };

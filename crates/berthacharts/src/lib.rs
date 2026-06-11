@@ -120,10 +120,12 @@ pub mod prelude {
 
     #[cfg(feature = "charts")]
     pub use crate::charts::{
-        BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, HeatmapCell,
-        HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError,
-        LineChartOptions, LineChartSpec, LineChartSummary, LineDatum, ScatterDatum,
-        ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary,
+        AreaChartError, AreaChartOptions, AreaChartSpec, AreaDatum, BarChartError, BarChartOptions,
+        BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell, HeatmapError,
+        HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
+        LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError,
+        ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary, SparklineDatum, SparklineError,
+        SparklineOptions, SparklineSpec, StackMode,
     };
 
     #[cfg(feature = "transforms")]
@@ -157,8 +159,9 @@ pub mod prelude {
 
     #[cfg(feature = "finance")]
     pub use crate::finance::{
-        bollinger_bands, exponential_moving_average, moving_average, rsi, BollingerBands, Candle,
-        CandleStyle, CandlestickError, CandlestickOptions, CandlestickSpec, Overlay,
+        atr, bollinger_bands, exponential_moving_average, ichimoku, macd, moving_average, obv, rsi,
+        stochastic, vwap, williams_r, BollingerBands, Candle, CandleStyle, CandlestickError,
+        CandlestickOptions, CandlestickSpec, Ichimoku, Macd, Overlay, Stochastic,
     };
 
     #[cfg(feature = "stats")]
@@ -170,10 +173,11 @@ pub mod prelude {
 
 #[cfg(feature = "charts")]
 pub use berthacharts_charts::{
-    BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum, HeatmapCell,
-    HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
-    LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions,
-    ScatterPlotSpec, ScatterPlotSummary,
+    AreaChartError, AreaChartOptions, AreaChartSpec, AreaDatum, BarChartError, BarChartOptions,
+    BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell, HeatmapError, HeatmapOptions,
+    HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions, LineChartSpec, LineChartSummary,
+    LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec,
+    ScatterPlotSummary, SparklineDatum, SparklineError, SparklineOptions, SparklineSpec, StackMode,
 };
 pub use berthacharts_core::{
     Chart, ChartError, ChartSize, ChartSpec, Dataset, DatasetId, Guide, Mark, Rect, Scene,

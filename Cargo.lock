@@ -139,8 +139,11 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "berthacharts"
 version = "0.0.1"
 dependencies = [
+ "berthacharts-anno",
  "berthacharts-charts",
  "berthacharts-core",
+ "berthacharts-dist",
+ "berthacharts-finance",
  "berthacharts-geo",
  "berthacharts-leptos",
  "berthacharts-network",
@@ -176,6 +179,7 @@ dependencies = [
 name = "berthacharts-charts"
 version = "0.0.1"
 dependencies = [
+ "ahash",
  "berthacharts-core",
 ]
 
@@ -220,6 +224,7 @@ dependencies = [
  "berthacharts-renderer-wgpu",
  "leptos",
  "log",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
 ]

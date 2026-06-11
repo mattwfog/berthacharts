@@ -6,16 +6,25 @@
 
 #![forbid(unsafe_code)]
 
+pub mod area;
 pub mod bar;
 pub mod heatmap;
 pub mod line;
 mod mark;
 pub mod scatter;
+pub mod sparkline;
 
+pub use area::{
+    AreaBand, AreaChartError, AreaChartLayout, AreaChartOptions, AreaChartSpec, AreaDatum,
+    StackMode,
+};
 pub use bar::{BarChartError, BarChartOptions, BarChartSpec, BarChartSummary, BarDatum};
 pub use berthacharts_core as core;
 pub use heatmap::{HeatmapCell, HeatmapError, HeatmapOptions, HeatmapSpec, HeatmapSummary};
 pub use line::{LineChartError, LineChartOptions, LineChartSpec, LineChartSummary, LineDatum};
 pub use scatter::{
     ScatterDatum, ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary,
+};
+pub use sparkline::{
+    DotMode, SparklineDatum, SparklineError, SparklineLayout, SparklineOptions, SparklineSpec,
 };
