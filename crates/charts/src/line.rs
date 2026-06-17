@@ -289,7 +289,7 @@ impl ChartSpec for LineChartSpec {
                     NumberChannel::Constant(tick.position),
                     NumberChannel::Constant(plot.x + plot.w),
                     NumberChannel::Constant(tick.position + 1.0),
-                    [0.90, 0.92, 0.96, 1.0],
+                    [0.20, 0.24, 0.32, 1.0],
                 )) as Arc<dyn Mark>
             })
             .collect();
@@ -301,7 +301,7 @@ impl ChartSpec for LineChartSpec {
                 NumberChannel::Constant(plot.y),
                 NumberChannel::Constant(tick.position + 1.0),
                 NumberChannel::Constant(plot.y + plot.h),
-                [0.94, 0.96, 0.98, 1.0],
+                [0.18, 0.22, 0.30, 1.0],
             )) as Arc<dyn Mark>
         }));
 

@@ -72,10 +72,16 @@ impl BerthaChart {
         canvas.set_width(pw);
         canvas.set_height(ph);
 
-        let renderer =
+        let mut renderer =
             Renderer::new_for_canvas_with_logical(canvas, pw, ph, width as f32, height as f32)
                 .await
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // Clear to the matyard dark card navy instead of white, so the canvas
+        // sits flush in the dark dashboard. The framebuffer is sRGB and wgpu
+        // treats the clear color as LINEAR, so these are sRGB->linear values of
+        // the card navy (~#0e1420) — passing the sRGB values directly rendered
+        // as a washed-out grey.
+        renderer.clear_color = berthacharts_renderer_wgpu::ClearColor([0.0045, 0.009, 0.016, 1.0]);
 
         Ok(BerthaChart {
             renderer,
@@ -480,6 +486,8 @@ struct HeatmapInput {
     signal_threshold: f32,
     #[serde(default)]
     legend_title: Option<String>,
+    #[serde(default)]
+    max_visible_labels: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -510,6 +518,7 @@ impl HeatmapInput {
         if let Some(title) = self.legend_title {
             opts.legend_title = title;
         }
+        opts.max_visible_labels = self.max_visible_labels;
         HeatmapSpec::new(cells).with_options(opts)
     }
 }

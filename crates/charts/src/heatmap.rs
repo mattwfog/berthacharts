@@ -363,11 +363,15 @@ impl ChartSpec for HeatmapSpec {
         let grid_h = (size.height as f32 - header.column_height).max(rows.len().max(1) as f32);
         let cell_w = grid_w / columns.len().max(1) as f32;
         let cell_h = grid_h / rows.len().max(1) as f32;
+        // Cap the gutter at a small fraction of the cell so cells read as a
+        // filled grid, not thin bars. On a dense dow×hour grid (24 columns) the
+        // old 35% cap left a ~9px sliver per ~29px cell — a barcode, not a
+        // heatmap. 8%/10% keeps a hairline gutter while the cell fills.
         let pad = self
             .options
             .cell_padding
-            .min(cell_w * 0.35)
-            .min(cell_h * 0.35)
+            .min(cell_w * 0.08)
+            .min(cell_h * 0.10)
             .max(0.0);
 
         let mut x1 = Vec::with_capacity(self.cells.len());
@@ -388,6 +392,14 @@ impl ChartSpec for HeatmapSpec {
         let mut labels = Vec::with_capacity(self.cells.len());
         let mut glyphs = Vec::new();
         let mut snap_targets = Vec::with_capacity(self.cells.len());
+        // Percentile (rank) normalization for the colour ramp. Idle-$ values
+        // cluster mid-range with a few high outliers, so value/max washed most
+        // cells to nearly the same colour. Ranking spreads the ramp evenly
+        // across cells (the median cell sits mid-ramp), so relative intensity is
+        // actually readable — you can tell a hot hour from a warm one.
+        let mut sorted_values: Vec<f32> = self.cells.iter().map(|c| c.value).collect();
+        sorted_values.sort_by(f32::total_cmp);
+        let rank_denom = (sorted_values.len().max(2) - 1) as f32;
 
         for cell in &self.cells {
             let row_index = index_of(&rows, &cell.row).unwrap_or(0);
@@ -397,7 +409,8 @@ impl ChartSpec for HeatmapSpec {
                 .unwrap_or_else(|| baseline_for(&columns, &baselines, &cell.column));
             let delta = cell.value - baseline;
             let signal = signal_label(delta, &self.options);
-            let [cr, cg, cb] = heatmap_color(cell.value, delta);
+            let rank = sorted_values.partition_point(|&v| v < cell.value) as f32;
+            let [cr, cg, cb] = heatmap_ramp(rank / rank_denom);
             let left = header.row_width + column_index as f32 * cell_w;
             let top = header.column_height + row_index as f32 * cell_h;
             let center_x = left + cell_w * 0.5;
@@ -434,18 +447,24 @@ impl ChartSpec for HeatmapSpec {
             } else {
                 None
             };
-            labels.push(heatmap_data_label(
-                center_x,
-                if label_detail.is_some() {
-                    center_y + cell_h * 0.18
-                } else {
-                    center_y
-                },
-                cell.value,
-                delta,
-                self.options.signal_threshold,
-                label_detail,
-            ));
+            // max_visible_labels == Some(0) → suppress per-cell value labels
+            // entirely (the DOM overlay renders every label it receives, so on a
+            // dense dow×hour grid the cell numbers become unreadable noise). The
+            // column/row HEADER labels are a separate guide and still render.
+            if self.options.max_visible_labels != Some(0) {
+                labels.push(heatmap_data_label(
+                    center_x,
+                    if label_detail.is_some() {
+                        center_y + cell_h * 0.18
+                    } else {
+                        center_y
+                    },
+                    cell.value,
+                    delta,
+                    self.options.signal_threshold,
+                    label_detail,
+                ));
+            }
             snap_targets.push(
                 SnapTarget::new(center_x, center_y, SnapKind::Center)
                     .with_radius(7.0)
@@ -805,14 +824,21 @@ fn format_delta(value: f32) -> String {
     }
 }
 
-fn heatmap_color(score: f32, delta: f32) -> [f32; 3] {
-    if delta < -0.07 {
-        let t = ((score - 0.45) / 0.18).clamp(0.0, 1.0);
-        [0.80 + 0.08 * t, 0.43 + 0.12 * t, 0.38 + 0.10 * t]
-    } else {
-        let t = ((score - 0.50) / 0.35).clamp(0.0, 1.0);
-        [0.40 - 0.16 * t, 0.58 + 0.22 * t, 0.82 - 0.18 * t]
-    }
+// Sequential intensity ramp: dark slate (low / empty) -> matyard signal
+// orange (hot). `t` is the cell value normalized to the heatmap's own max, so
+// a dollar-scale heatmap reads as an intensity field instead of the old
+// signal-vs-baseline classification (which saturated on large $ values and
+// produced scattered green/red noise). powf < 1 lifts mid-low cells so they
+// stay visible on the dark canvas.
+fn heatmap_ramp(t: f32) -> [f32; 3] {
+    let t = t.clamp(0.0, 1.0).powf(0.7);
+    let base = [0.12, 0.16, 0.24];
+    let hot = [0.98, 0.45, 0.13];
+    [
+        base[0] + (hot[0] - base[0]) * t,
+        base[1] + (hot[1] - base[1]) * t,
+        base[2] + (hot[2] - base[2]) * t,
+    ]
 }
 
 fn rgba(r: f32, g: f32, b: f32, a: f32) -> [f32; 4] {

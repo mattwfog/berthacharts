@@ -320,7 +320,7 @@ impl ChartSpec for BarChartSpec {
                     NumberChannel::Constant(tick.position),
                     NumberChannel::Constant(plot.x + plot.w),
                     NumberChannel::Constant(tick.position + 1.0),
-                    [0.90, 0.92, 0.96, 1.0],
+                    [0.20, 0.24, 0.32, 1.0],
                 )) as Arc<dyn Mark>
             })
             .collect();
@@ -371,13 +371,20 @@ impl ChartSpec for BarChartSpec {
             a: None,
         };
         marks.push(Arc::new(bars));
-        marks.push(Arc::new(GeometryMark::new(
-            ANALYSIS_MARK,
-            analysis_geometry(
-                &centers, &values, &trend, &residuals, sigma, &y_axis, target,
-            ),
-            Rect::new(0.0, 0.0, size.width as f32, size.height as f32),
-        )));
+        // The trend line + model band + residual glyphs are meaningful only
+        // against a configured target/threshold. On plain categorical bars
+        // (ranked customers, machines, locations) they read as a spurious
+        // downward trend with stray triangles, so only draw the analysis layer
+        // when a target is actually set.
+        if self.options.target.is_some() {
+            marks.push(Arc::new(GeometryMark::new(
+                ANALYSIS_MARK,
+                analysis_geometry(
+                    &centers, &values, &trend, &residuals, sigma, &y_axis, target,
+                ),
+                Rect::new(0.0, 0.0, size.width as f32, size.height as f32),
+            )));
+        }
 
         let labels = data_labels(&centers, &values, &target_gaps, &y_axis, target);
         let label_count = self
