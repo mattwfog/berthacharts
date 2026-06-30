@@ -28,6 +28,12 @@ cd crates/bindings-react/pkg
 echo "==> stamping npm package name: ${PKG_NAME}"
 npm pkg set name="${PKG_NAME}"
 
+# wasm-pack copies the crate's LICENSE files into pkg/ but its generated `files`
+# allowlist omits them, so they're absent from the tarball. Add them explicitly.
+echo "==> bundling license files"
+cp "${ROOT}/LICENSE-MIT" "${ROOT}/LICENSE-APACHE" .
+npm pkg set 'files[]=LICENSE-MIT' 'files[]=LICENSE-APACHE'
+
 echo "==> done. package ready at: $(pwd)"
 echo "    name:    $(npm pkg get name)"
 echo "    version: $(npm pkg get version)"
