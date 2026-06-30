@@ -76,12 +76,13 @@ impl BerthaChart {
             Renderer::new_for_canvas_with_logical(canvas, pw, ph, width as f32, height as f32)
                 .await
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        // Clear to the matyard dark card navy instead of white, so the canvas
-        // sits flush in the dark dashboard. The framebuffer is sRGB and wgpu
-        // treats the clear color as LINEAR, so these are sRGB->linear values of
-        // the card navy (~#0e1420) — passing the sRGB values directly rendered
-        // as a washed-out grey.
-        renderer.clear_color = berthacharts_renderer_wgpu::ClearColor([0.0045, 0.009, 0.016, 1.0]);
+        // Clear to fully transparent so the canvas composites over the host
+        // page's background instead of baking in a fixed fill. This is what
+        // makes the chart adapt to light AND dark themes: the page background
+        // shows through, and the DOM overlay (axes / value labels) is themed by
+        // the host's own CSS. Requires a transparent surface alpha mode, which
+        // the renderer selects when the platform offers one.
+        renderer.clear_color = berthacharts_renderer_wgpu::ClearColor([0.0, 0.0, 0.0, 0.0]);
 
         Ok(BerthaChart {
             renderer,

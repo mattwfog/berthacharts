@@ -289,13 +289,30 @@ impl Renderer {
             .find(|f| f.is_srgb())
             .unwrap_or_else(|| caps.formats[0]);
 
+        // Prefer a composite alpha mode that lets the canvas blend with the
+        // page, so a transparent clear shows the host page's background through
+        // the chart (themable in both light and dark). Falls back to the
+        // platform default when no transparent mode is offered.
+        let alpha_mode = caps
+            .alpha_modes
+            .iter()
+            .copied()
+            .find(|m| {
+                matches!(
+                    m,
+                    wgpu::CompositeAlphaMode::PreMultiplied
+                        | wgpu::CompositeAlphaMode::PostMultiplied
+                )
+            })
+            .unwrap_or(caps.alpha_modes[0]);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width,
             height,
             present_mode: caps.present_modes[0],
-            alpha_mode: caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
