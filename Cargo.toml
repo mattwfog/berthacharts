@@ -64,7 +64,11 @@ web-sys      = "0.3"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-strip = "symbols"
+# Keep the wasm `name` section (function names) so a production panic in the
+# kernel resolves to real symbols in error tracking instead of ten anonymous
+# `?` frames; drop only DWARF debug info to stay lean. (Was "symbols", which
+# stripped names entirely and made prod traps undiagnosable.)
+strip = "debuginfo"
 
 [profile.release.package."*"]
 opt-level = 3
