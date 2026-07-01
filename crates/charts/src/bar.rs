@@ -699,7 +699,12 @@ fn analysis_geometry(
 
 fn bar_color(value: f32, y_max: f32) -> [f32; 3] {
     let t = (value / y_max.max(1.0)).clamp(0.0, 1.0);
-    [0.30 - 0.08 * t, 0.50 + 0.22 * t, 0.94 - 0.18 * t]
+    // Blue value-ramp in LINEAR RGB (the framebuffer is sRGB): short bars are
+    // ~blue-400 (#60a5fa), tall bars deepen to ~blue-600 (#2563eb) — taller =
+    // more saturated/darker, a mid-blue that keeps contrast on both a white
+    // (light-mode) and dark page. Replaces the previous ramp whose TALLEST
+    // bars came out palest cyan (weak on white).
+    [0.117 - 0.098 * t, 0.376 - 0.251 * t, 0.956 - 0.125 * t]
 }
 
 fn nice_upper(value: f32) -> f32 {
