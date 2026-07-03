@@ -9,8 +9,10 @@ use std::sync::Arc;
 
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PathCommand,
-    PathPrim, PickCtx, PickHit, PointPrim, Rect, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, LabelTooltip, LabelTooltipRow, Layer, LayerId, LinePrim, LinearScale, Mark,
+    MarkId, PathCommand, PathPrim, PickCtx, PickHit, PointPrim, Rect, Scale, ScaleId, Scene,
+    SnapKind, SnapTarget, SnapTargetSet, TessellateCtx, Workspace,
 };
 
 const DATASET: DatasetId = DatasetId::new(0);
@@ -204,6 +206,20 @@ impl ChartSpec for SparklineSpec {
             z: 0,
             clip: None,
         });
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, &self.data)).with_name("sparkline anchors"),
+        ));
+        if compact_labels_allowed(&layout) {
+            let labels = compact_labels(&layout, &self.data);
+            if !labels.is_empty() {
+                let max_visible = labels.len();
+                scene.guides.push(Guide::Labels(
+                    LabelGuide::new(labels)
+                        .with_collision_padding(2.0)
+                        .with_max_visible(max_visible),
+                ));
+            }
+        }
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -299,6 +315,104 @@ fn dataset(layout: &SparklineLayout) -> Dataset {
             ("y".to_string(), Column::F32(ColumnData::new(y))),
         ],
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SparklineAnchor {
+    role: &'static str,
+    index: usize,
+    point: [f32; 2],
+    label_anchor: LabelAnchor,
+    label_priority: LabelPriority,
+    snap_priority: i16,
+}
+
+fn semantic_anchors(layout: &SparklineLayout) -> Vec<SparklineAnchor> {
+    let mut anchors = Vec::new();
+    let mut seen = Vec::new();
+    let mut push = |anchor: SparklineAnchor| {
+        if !seen.contains(&anchor.index) {
+            seen.push(anchor.index);
+            anchors.push(anchor);
+        }
+    };
+
+    push(SparklineAnchor {
+        role: "start",
+        index: 0,
+        point: layout.first,
+        label_anchor: LabelAnchor::Right,
+        label_priority: LabelPriority::Required,
+        snap_priority: 2,
+    });
+    push(SparklineAnchor {
+        role: "min",
+        index: layout.min.1,
+        point: layout.min.0,
+        label_anchor: LabelAnchor::Top,
+        label_priority: LabelPriority::Important,
+        snap_priority: 3,
+    });
+    push(SparklineAnchor {
+        role: "max",
+        index: layout.max.1,
+        point: layout.max.0,
+        label_anchor: LabelAnchor::Bottom,
+        label_priority: LabelPriority::Important,
+        snap_priority: 3,
+    });
+    push(SparklineAnchor {
+        role: "end",
+        index: layout.points.len() - 1,
+        point: layout.last,
+        label_anchor: LabelAnchor::Left,
+        label_priority: LabelPriority::Required,
+        snap_priority: 2,
+    });
+
+    anchors
+}
+
+fn snap_targets(layout: &SparklineLayout, data: &[SparklineDatum]) -> Vec<SnapTarget> {
+    semantic_anchors(layout)
+        .into_iter()
+        .map(|anchor| {
+            let datum = data[anchor.index];
+            SnapTarget::new(anchor.point[0], anchor.point[1], SnapKind::Point)
+                .with_radius(7.0)
+                .with_label(format!("{} {:.1}", anchor.role, datum.y))
+                .with_priority(anchor.snap_priority)
+        })
+        .collect()
+}
+
+fn compact_labels_allowed(layout: &SparklineLayout) -> bool {
+    if layout.points.len() < 2 {
+        return false;
+    }
+    let spacing = layout.plot.w / (layout.points.len() - 1) as f32;
+    layout.points.len() <= 12 && spacing >= 12.0 && layout.plot.h >= 24.0
+}
+
+fn compact_labels(layout: &SparklineLayout, data: &[SparklineDatum]) -> Vec<LabelItem> {
+    semantic_anchors(layout)
+        .into_iter()
+        .map(|anchor| {
+            let datum = data[anchor.index];
+            LabelItem::new(anchor.point[0], anchor.point[1], anchor.role)
+                .with_detail(format!("{:.1}", datum.y))
+                .with_anchor(anchor.label_anchor)
+                .with_kind(LabelKind::Data)
+                .with_priority(anchor.label_priority)
+                .with_tooltip(LabelTooltip::new(
+                    anchor.role,
+                    vec![
+                        LabelTooltipRow::new("X", format!("{:.1}", datum.x)),
+                        LabelTooltipRow::new("Y", format!("{:.1}", datum.y)),
+                    ],
+                ))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -504,6 +618,7 @@ impl Mark for SparklineDotsMark {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::Guide;
 
     #[test]
     fn requires_two_points() {
@@ -521,6 +636,56 @@ mod tests {
             .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(120, 30))
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn emits_endpoint_and_extrema_snap_targets_with_compact_labels_when_sparse() {
+        let data = vec![
+            SparklineDatum::new(0.0, 5.0),
+            SparklineDatum::new(1.0, 10.0),
+            SparklineDatum::new(2.0, 1.0),
+            SparklineDatum::new(3.0, 8.0),
+        ];
+
+        let chart = SparklineSpec::new(data)
+            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(160, 48))
+            .expect("chart");
+
+        assert_eq!(chart.snap_targets().len(), 4);
+
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(labels),
+                _ => None,
+            })
+            .expect("label guide");
+        assert_eq!(labels.items.len(), 4);
+        assert_eq!(labels.max_visible, Some(4));
+        assert_eq!(labels.items[0].text, "start");
+        assert_eq!(labels.items[1].text, "min");
+        assert_eq!(labels.items[2].text, "max");
+        assert_eq!(labels.items[3].text, "end");
+    }
+
+    #[test]
+    fn omits_compact_labels_when_data_is_too_dense() {
+        let data: Vec<SparklineDatum> = (0..24)
+            .map(|i| SparklineDatum::new(i as f32, (i as f32 * 0.35).sin()))
+            .collect();
+
+        let chart = SparklineSpec::new(data)
+            .build_chart(berthacharts_core::Workspace::new(), ChartSize::new(120, 30))
+            .expect("chart");
+
+        assert_eq!(chart.snap_targets().len(), 4);
+        assert!(chart
+            .scene()
+            .guides
+            .iter()
+            .all(|guide| !matches!(guide, Guide::Labels(_))));
     }
 
     #[test]

@@ -9,9 +9,10 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Guide, LabelGuide, LabelItem, LabelPriority, Layer, LayerId, LinearScale,
-    Mark, MarkId, PathCommand, PathPrim, PickCtx, PickHit, Rect, Scale, ScaleId, Scene,
-    TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LinearScale, Mark, MarkId, PathCommand, PathPrim, PickCtx,
+    PickHit, Rect, Scale, ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet, TessellateCtx,
+    TooltipField, TooltipGuide, Workspace,
 };
 
 const NODE_DATASET: DatasetId = DatasetId::new(0);
@@ -240,7 +241,7 @@ impl ChartSpec for ChordSpec {
         workspace.upsert_scale(Y_SCALE, y_scale);
         workspace.upsert_coord(COORD, Arc::new(CartesianCoord::new(X_SCALE, Y_SCALE)));
         workspace.upsert_dataset(node_dataset(&layout));
-        workspace.upsert_dataset(link_dataset(&layout));
+        workspace.upsert_dataset(link_dataset(&layout, &self.links));
 
         let ribbon_mark: Arc<dyn Mark> = Arc::new(ChordRibbonMark::new(
             RIBBON_MARK,
@@ -268,6 +269,32 @@ impl ChartSpec for ChordSpec {
                 ));
             }
         }
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                ARC_MARK,
+                NODE_DATASET,
+                vec![
+                    TooltipField::new("Id", "id").as_label(),
+                    TooltipField::new("Total", "total"),
+                ],
+            )
+            .with_title_column("label"),
+        ));
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                RIBBON_MARK,
+                LINK_DATASET,
+                vec![
+                    TooltipField::new("Source", "source").as_label(),
+                    TooltipField::new("Target", "target").as_label(),
+                    TooltipField::new("Value", "value"),
+                ],
+            )
+            .with_title_column("link"),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, &self.links)).with_name("chord anchors"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -372,16 +399,16 @@ fn compute_layout(
         };
         let s_start = arcs[s].start_angle + consumed[s];
         let s_end = s_start + s_share;
-        consumed[s] += s_share;
-
-        let t_start = arcs[t].start_angle + consumed[t];
-        let t_end = t_start + t_share;
-        if s != t {
-            consumed[t] += t_share;
+        let (t_start, t_end) = if s == t {
+            consumed[s] += s_share;
+            (s_start, s_end)
         } else {
-            // self-loop already consumed via s_share; bump again for symmetry
+            consumed[s] += s_share;
+            let t_start = arcs[t].start_angle + consumed[t];
+            let t_end = t_start + t_share;
             consumed[t] += t_share;
-        }
+            (t_start, t_end)
+        };
 
         let color = l.color.unwrap_or(arcs[s].color);
         ribbons.push(ChordRibbon {
@@ -520,16 +547,26 @@ fn build_labels(layout: &ChordLayout, offset: f32) -> Vec<LabelItem> {
         .map(|a| {
             let mid = (a.start_angle + a.end_angle) * 0.5;
             let p = point_at(layout.center, radius, mid);
-            LabelItem::new(p[0], p[1], a.label.clone()).with_priority(LabelPriority::Important)
+            let anchor = if p[0] >= layout.center[0] {
+                LabelAnchor::Right
+            } else {
+                LabelAnchor::Left
+            };
+            LabelItem::new(p[0], p[1], a.label.clone())
+                .with_anchor(anchor)
+                .with_kind(LabelKind::Node)
+                .with_priority(LabelPriority::Important)
         })
         .collect()
 }
 
 fn node_dataset(layout: &ChordLayout) -> Dataset {
     let mut id_col: Vec<Arc<str>> = Vec::with_capacity(layout.arcs.len());
+    let mut label_col: Vec<Arc<str>> = Vec::with_capacity(layout.arcs.len());
     let mut total: Vec<f32> = Vec::with_capacity(layout.arcs.len());
     for a in &layout.arcs {
         id_col.push(Arc::from(a.node_id.as_str()));
+        label_col.push(Arc::from(a.label.as_str()));
         total.push(a.total_value);
     }
     Dataset::new(
@@ -537,21 +574,88 @@ fn node_dataset(layout: &ChordLayout) -> Dataset {
         1,
         vec![
             ("id".to_string(), Column::Utf8(ColumnData::new(id_col))),
+            (
+                "label".to_string(),
+                Column::Utf8(ColumnData::new(label_col)),
+            ),
             ("total".to_string(), Column::F32(ColumnData::new(total))),
         ],
     )
 }
 
-fn link_dataset(layout: &ChordLayout) -> Dataset {
+fn link_dataset(layout: &ChordLayout, input_links: &[ChordLink]) -> Dataset {
+    debug_assert_eq!(layout.ribbons.len(), input_links.len());
+    let mut link_col: Vec<Arc<str>> = Vec::with_capacity(layout.ribbons.len());
+    let mut source_col: Vec<Arc<str>> = Vec::with_capacity(layout.ribbons.len());
+    let mut target_col: Vec<Arc<str>> = Vec::with_capacity(layout.ribbons.len());
     let mut values: Vec<f32> = Vec::with_capacity(layout.ribbons.len());
-    for r in &layout.ribbons {
+    for (r, input) in layout.ribbons.iter().zip(input_links) {
+        link_col.push(Arc::from(format!("{} to {}", input.source, input.target)));
+        source_col.push(Arc::from(input.source.as_str()));
+        target_col.push(Arc::from(input.target.as_str()));
         values.push(r.value);
     }
     Dataset::new(
         LINK_DATASET,
         1,
-        vec![("value".to_string(), Column::F32(ColumnData::new(values)))],
+        vec![
+            ("link".to_string(), Column::Utf8(ColumnData::new(link_col))),
+            (
+                "source".to_string(),
+                Column::Utf8(ColumnData::new(source_col)),
+            ),
+            (
+                "target".to_string(),
+                Column::Utf8(ColumnData::new(target_col)),
+            ),
+            ("value".to_string(), Column::F32(ColumnData::new(values))),
+        ],
     )
+}
+
+fn snap_targets(layout: &ChordLayout, input_links: &[ChordLink]) -> Vec<SnapTarget> {
+    let mut targets = Vec::with_capacity(layout.arcs.len() + layout.ribbons.len());
+    let arc_radius = (layout.inner_radius + layout.outer_radius) * 0.5;
+    targets.extend(layout.arcs.iter().map(|arc| {
+        let mid = (arc.start_angle + arc.end_angle) * 0.5;
+        let p = point_at(layout.center, arc_radius, mid);
+        SnapTarget::new(p[0], p[1], SnapKind::Node)
+            .with_radius(
+                (layout.outer_radius - layout.inner_radius)
+                    .mul_add(0.2, 5.0)
+                    .clamp(5.0, 12.0),
+            )
+            .with_label(format!("{} arc", arc.label))
+            .with_priority(3)
+    }));
+    targets.extend(
+        layout
+            .ribbons
+            .iter()
+            .zip(input_links)
+            .map(|(ribbon, input)| {
+                let source_mid = (ribbon.source_start + ribbon.source_end) * 0.5;
+                let target_mid = (ribbon.target_start + ribbon.target_end) * 0.5;
+                let source = point_at(layout.center, layout.inner_radius, source_mid);
+                let target = point_at(layout.center, layout.inner_radius, target_mid);
+                SnapTarget::new(
+                    (source[0] + target[0]) * 0.5,
+                    (source[1] + target[1]) * 0.5,
+                    SnapKind::Edge,
+                )
+                .with_radius(
+                    ribbon
+                        .value
+                        .max(0.0)
+                        .sqrt()
+                        .mul_add(0.5, 5.0)
+                        .clamp(5.0, 12.0),
+                )
+                .with_label(format!("{} to {}", input.source, input.target))
+                .with_priority(1)
+            }),
+    );
+    targets
 }
 
 #[derive(Debug, Clone)]

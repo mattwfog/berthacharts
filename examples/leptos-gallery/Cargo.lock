@@ -137,14 +137,15 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "berthacharts-charts"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
+ "ahash",
  "berthacharts-core",
 ]
 
 [[package]]
 name = "berthacharts-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "ahash",
  "glam",
@@ -154,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "berthacharts-geo"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "berthacharts-core",
  "serde_json",
@@ -162,12 +163,13 @@ dependencies = [
 
 [[package]]
 name = "berthacharts-leptos"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "berthacharts-core",
  "berthacharts-renderer-wgpu",
  "leptos",
  "log",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
 ]
@@ -194,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "berthacharts-network"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "ahash",
  "berthacharts-core",
@@ -202,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "berthacharts-renderer-wgpu"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "berthacharts-core",
  "bytemuck",

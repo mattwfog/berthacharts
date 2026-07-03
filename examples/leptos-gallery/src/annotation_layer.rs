@@ -9,7 +9,9 @@ use std::sync::Arc;
 use berthacharts_core::{Chart, Geometry, SnapKind, SnapTarget, TessellateCtx};
 use leptos::prelude::*;
 
-use crate::dom_events::{event_offset_in_current_target, event_target_value_as_f32};
+use crate::dom_events::{
+    event_current_target_size, event_offset_in_current_target, event_target_value_as_f32,
+};
 
 type SketchPoint = (f32, f32);
 
@@ -377,13 +379,45 @@ fn sketch_event_point(
     snap_enabled: bool,
     snap_targets: &[SnapTarget],
 ) -> SketchPoint {
-    let point = clamped_event_point(ev, width, height);
+    sketch_point_from_offsets(
+        event_offset_in_current_target(ev),
+        event_current_target_size(ev),
+        (width as f32, height as f32),
+        snap_enabled,
+        snap_targets,
+    )
+}
+
+fn sketch_point_from_offsets(
+    offsets: SketchPoint,
+    rendered_size: SketchPoint,
+    chart_size: SketchPoint,
+    snap_enabled: bool,
+    snap_targets: &[SnapTarget],
+) -> SketchPoint {
+    let point = logical_chart_point_from_offsets(offsets, rendered_size, chart_size);
     snap_to_circle(point, snap_enabled, snap_targets)
 }
 
-fn clamped_event_point(ev: &web_sys::MouseEvent, width: u32, height: u32) -> SketchPoint {
-    let (x, y) = event_offset_in_current_target(ev);
-    (x.clamp(0.0, width as f32), y.clamp(0.0, height as f32))
+fn logical_chart_point_from_offsets(
+    offsets: SketchPoint,
+    rendered_size: SketchPoint,
+    chart_size: SketchPoint,
+) -> SketchPoint {
+    let scale_x = chart_scale(rendered_size.0, chart_size.0);
+    let scale_y = chart_scale(rendered_size.1, chart_size.1);
+    (
+        (offsets.0 * scale_x).clamp(0.0, chart_size.0),
+        (offsets.1 * scale_y).clamp(0.0, chart_size.1),
+    )
+}
+
+fn chart_scale(rendered: f32, logical: f32) -> f32 {
+    if rendered.is_finite() && rendered > 0.0 {
+        logical / rendered
+    } else {
+        1.0
+    }
 }
 
 fn snap_to_circle(
@@ -479,4 +513,38 @@ fn sketch_points_attr(points: &[SketchPoint]) -> String {
         .map(|(x, y)| format!("{x:.1},{y:.1}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rendered_offsets_convert_to_logical_chart_coordinates() {
+        let point = logical_chart_point_from_offsets((50.0, 25.0), (200.0, 100.0), (400.0, 200.0));
+
+        assert_eq!(point, (100.0, 50.0));
+    }
+
+    #[test]
+    fn rendered_offsets_clamp_after_scaling_to_logical_space() {
+        let point =
+            logical_chart_point_from_offsets((240.0, -10.0), (200.0, 100.0), (400.0, 200.0));
+
+        assert_eq!(point, (400.0, 0.0));
+    }
+
+    #[test]
+    fn sketch_points_snap_after_coordinate_conversion() {
+        let target = SnapTarget::new(100.0, 50.0, SnapKind::Point).with_radius(4.0);
+        let point = sketch_point_from_offsets(
+            (49.0, 24.0),
+            (200.0, 100.0),
+            (400.0, 200.0),
+            true,
+            &[target],
+        );
+
+        assert_eq!(point, (100.0, 50.0));
+    }
 }

@@ -182,15 +182,21 @@ canvas {
 
 .sketch-toolbar {
   align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  justify-content: stretch;
+  margin: 0 0 8px;
+  min-height: 30px;
+}
+
+.sketch-popover {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
-  margin: 0 0 8px;
-}
-
-.sketch-popover {
-  display: contents;
+  min-width: 0;
   visibility: hidden;
 }
 
@@ -205,6 +211,7 @@ canvas {
 .sketch-tool-group {
   align-items: center;
   display: inline-flex;
+  flex: 0 0 auto;
   gap: 5px;
 }
 
@@ -235,7 +242,9 @@ canvas {
   background: #f7f9fc;
   border: 1px solid var(--border);
   border-radius: 6px;
+  flex: 0 1 132px;
   height: 30px;
+  min-width: 112px;
   padding: 0 5px;
 }
 
@@ -263,8 +272,10 @@ canvas {
 .sketch-width {
   accent-color: var(--accent);
   cursor: pointer;
+  flex: 1 1 42px;
   margin: 0;
-  width: 62px;
+  min-width: 42px;
+  width: 54px;
 }
 
 .sketch-width-readout {
@@ -287,7 +298,8 @@ canvas {
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
-  min-width: 54px;
+  min-height: 30px;
+  min-width: 50px;
   padding: 7px 10px;
 }
 
@@ -462,8 +474,9 @@ canvas {
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
   color: #f7faff;
   font-size: 12px;
-  max-width: 240px;
-  min-width: 174px;
+  max-width: min(240px, calc(100% - 16px));
+  min-width: min(174px, calc(100% - 16px));
+  overflow-wrap: anywhere;
   padding: 10px 11px;
   pointer-events: none;
   position: absolute;
@@ -474,17 +487,16 @@ canvas {
   font-weight: 700;
   line-height: 1.2;
   margin-bottom: 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .chart-tooltip-row {
   align-items: baseline;
   color: rgba(229, 236, 248, 0.72);
-  column-gap: 18px;
+  column-gap: 12px;
   display: grid;
-  grid-template-columns: minmax(64px, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) minmax(0, max-content);
   line-height: 1.45;
 }
 
@@ -494,17 +506,18 @@ canvas {
 
 .chart-tooltip-row span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .chart-tooltip-row strong {
   color: #ffffff;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
   text-align: right;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .guide-label-has-tooltip {
@@ -513,6 +526,8 @@ canvas {
 }
 
 .guide-label-tooltip {
+  --label-tooltip-x: -50%;
+  --label-tooltip-y: 4px;
   background: rgba(16, 20, 27, 0.98);
   border: 1px solid rgba(230, 236, 248, 0.14);
   border-radius: 6px;
@@ -521,16 +536,20 @@ canvas {
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
   color: #f7faff;
   font-size: 12px;
+  inline-size: max-content;
   left: 50%;
   line-height: 1.45;
-  min-width: 176px;
+  max-inline-size: min(240px, calc(var(--chart-width, 320px) - 16px));
+  min-width: min(176px, calc(var(--chart-width, 320px) - 16px));
   opacity: 0;
+  overflow-wrap: anywhere;
   padding: 10px 11px;
   pointer-events: none;
   position: absolute;
-  transform: translate(-50%, 4px);
+  transform: translate(var(--label-tooltip-x), var(--label-tooltip-y));
   transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
   visibility: hidden;
+  white-space: normal;
   z-index: 6;
 }
 
@@ -540,18 +559,40 @@ canvas {
 
 .guide-label-tooltip .chart-tooltip-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .guide-label-tooltip-below {
+  --label-tooltip-y: -4px;
   bottom: auto;
   top: calc(100% + 8px);
-  transform: translate(-50%, -4px);
+}
+
+.guide-label-tooltip-start {
+  --label-tooltip-x: 0;
+  left: 0;
+}
+
+.guide-label-tooltip-end {
+  --label-tooltip-x: 0;
+  left: auto;
+  right: 0;
+}
+
+.guide-label-tooltip-key,
+.guide-label-tooltip-value {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.guide-label-tooltip-value {
+  text-align: right;
 }
 
 .guide-label-has-tooltip:hover .guide-label-tooltip,
 .guide-label-has-tooltip:focus-visible .guide-label-tooltip {
+  --label-tooltip-y: 0;
   opacity: 1;
-  transform: translate(-50%, 0);
   visibility: visible;
 }
 
@@ -5326,6 +5367,26 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
   nav { padding-left: 16px; padding-right: 16px; }
   main { padding: 16px; }
   .example-head { display: block; }
+  .sketch-toolbar {
+    align-items: start;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .sketch-popover {
+    justify-content: flex-start;
+  }
+  .sketch-color-swatch {
+    height: 20px;
+    width: 20px;
+  }
+  .sketch-button {
+    min-width: 46px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .sketch-width-group {
+    flex-basis: 118px;
+    min-width: 106px;
+  }
   .stat-strip { justify-content: flex-start; margin-bottom: 14px; overflow: visible; }
   .maplibre-lab-head { grid-template-columns: minmax(0, 1fr); }
   .maplibre-mode-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }

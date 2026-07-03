@@ -23,6 +23,70 @@ use crate::dom_events::{
 };
 use crate::guide_overlay::{render_guides_html, render_tooltip_html};
 
+const TOOLTIP_POINTER_GAP: f32 = 14.0;
+const TOOLTIP_CHART_MARGIN: f32 = 8.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TooltipPlacement {
+    left: f32,
+    top: f32,
+}
+
+impl TooltipPlacement {
+    fn style(self) -> String {
+        format!(
+            "display:block;left:{:.1}px;top:{:.1}px",
+            self.left, self.top
+        )
+    }
+}
+
+fn place_tooltip(
+    pointer: (f32, f32),
+    tooltip_size: (f32, f32),
+    chart_size: (f32, f32),
+) -> TooltipPlacement {
+    let preferred_left = pointer.0 + TOOLTIP_POINTER_GAP;
+    let preferred_top = pointer.1 + TOOLTIP_POINTER_GAP;
+    let max_left = (chart_size.0 - tooltip_size.0 - TOOLTIP_CHART_MARGIN).max(TOOLTIP_CHART_MARGIN);
+    let max_top = (chart_size.1 - tooltip_size.1 - TOOLTIP_CHART_MARGIN).max(TOOLTIP_CHART_MARGIN);
+
+    TooltipPlacement {
+        left: preferred_left.clamp(TOOLTIP_CHART_MARGIN, max_left),
+        top: preferred_top.clamp(TOOLTIP_CHART_MARGIN, max_top),
+    }
+}
+
+fn measured_tooltip_size(
+    tooltip_ref: NodeRef<leptos::html::Div>,
+    chart_size: (f32, f32),
+) -> (f32, f32) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(tooltip) = tooltip_ref.get() {
+            let width = tooltip.offset_width() as f32;
+            let height = tooltip.offset_height() as f32;
+            if width > 0.0 && height > 0.0 {
+                return (width, height);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = tooltip_ref;
+    }
+
+    fallback_tooltip_size(chart_size)
+}
+
+fn fallback_tooltip_size(chart_size: (f32, f32)) -> (f32, f32) {
+    (
+        chart_size.0.clamp(120.0, 240.0),
+        chart_size.1.clamp(72.0, 160.0),
+    )
+}
+
 // Re-export so the existing `use crate::chart_canvas::BuildChart` paths in
 // the gallery example modules keep working.
 pub use berthacharts_leptos::BuildChart;
@@ -50,6 +114,7 @@ pub fn ChartCanvas(
 ) -> impl IntoView {
     let viewport_ref: NodeRef<leptos::html::Div> = NodeRef::new();
     let canvas_ref: NodeRef<leptos::html::Canvas> = NodeRef::new();
+    let tooltip_ref: NodeRef<leptos::html::Div> = NodeRef::new();
     let device_pixel_ratio = browser_device_pixel_ratio();
     let physical_width = physical_px(width, device_pixel_ratio);
     let physical_height = physical_px(height, device_pixel_ratio);
@@ -96,7 +161,9 @@ pub fn ChartCanvas(
             >
                 <div
                     class="canvas-stack"
-                    style=move || format!("width:{width}px;height:{height}px")
+                    style=move || format!(
+                        "width:{width}px;height:{height}px;--chart-width:{width}px;--chart-height:{height}px"
+                    )
                     on:mousemove=move |ev| {
                         if draw_enabled.get_untracked() {
                             tooltip_style.set(String::from("display:none"));
@@ -122,14 +189,18 @@ pub fn ChartCanvas(
                         let logical_y = css_y * scale_y;
                         if let Some(hit) = pick_chart.pick((logical_x, logical_y)) {
                             if let Some(html) = render_tooltip_html(&pick_chart, &hit) {
-                                let left = ((logical_x as i32) + 14).min(width as i32 - 176).max(8);
-                                let top = ((logical_y as i32) + 14).min(height as i32 - 128).max(8);
                                 tooltip_html.set(html);
-                                tooltip_style.set(format!(
-                                    "display:block;left:{}px;top:{}px",
-                                    left,
-                                    top,
+                                tooltip_style.set(String::from(
+                                    "display:block;visibility:hidden;left:0px;top:0px",
                                 ));
+                                let chart_size = (width as f32, height as f32);
+                                let tooltip_size = measured_tooltip_size(tooltip_ref, chart_size);
+                                let placement = place_tooltip(
+                                    (logical_x, logical_y),
+                                    tooltip_size,
+                                    chart_size,
+                                );
+                                tooltip_style.set(placement.style());
                                 return;
                             }
                         }
@@ -152,7 +223,12 @@ pub fn ChartCanvas(
                         state=annotations
                         snap_targets=snap_targets_layer
                     />
-                    <div class="chart-tooltip" style=move || tooltip_style.get() inner_html=move || tooltip_html.get()></div>
+                    <div
+                        node_ref=tooltip_ref
+                        class="chart-tooltip"
+                        style=move || tooltip_style.get()
+                        inner_html=move || tooltip_html.get()
+                    ></div>
                 </div>
             </div>
             <div class="guide-flow guide-flow-bottom" inner_html=guide_flow_bottom></div>
@@ -340,4 +416,33 @@ fn mount_renderer_when_visible(
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tooltip_placement_keeps_pointer_offset_when_space_allows() {
+        let placement = place_tooltip((100.0, 50.0), (180.0, 80.0), (400.0, 220.0));
+
+        assert_eq!(placement.left, 114.0);
+        assert_eq!(placement.top, 64.0);
+    }
+
+    #[test]
+    fn tooltip_placement_clamps_to_chart_local_bounds() {
+        let placement = place_tooltip((392.0, 214.0), (180.0, 80.0), (400.0, 220.0));
+
+        assert_eq!(placement.left, 212.0);
+        assert_eq!(placement.top, 132.0);
+    }
+
+    #[test]
+    fn tooltip_placement_handles_tooltips_larger_than_chart() {
+        let placement = place_tooltip((12.0, 18.0), (500.0, 300.0), (120.0, 90.0));
+
+        assert_eq!(placement.left, 8.0);
+        assert_eq!(placement.top, 8.0);
+    }
 }

@@ -10,8 +10,10 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PathCommand,
-    PathPrim, PickCtx, PickHit, Rect, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, Layer, LayerId, LegendAnchor, LegendGuide, LegendItem,
+    LinePrim, LinearScale, Mark, MarkId, PathCommand, PathPrim, PickCtx, PickHit, Rect, Scale,
+    ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet, TessellateCtx, TooltipField, TooltipGuide,
+    Workspace,
 };
 
 const DATASET: DatasetId = DatasetId::new(0);
@@ -218,6 +220,26 @@ impl ChartSpec for AreaChartSpec {
             z: 0,
             clip: None,
         });
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                AREA_MARK,
+                DATASET,
+                vec![
+                    TooltipField::new("Series", "series").as_label(),
+                    TooltipField::new("X", "x").as_number(1),
+                    TooltipField::new("Y", "y").as_number(1),
+                ],
+            )
+            .with_title_column("series"),
+        ));
+        scene.guides.push(Guide::Legend(
+            LegendGuide::new(legend_items(&layout))
+                .with_title("Series")
+                .with_anchor(LegendAnchor::Bottom),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout)).with_name("area band tops"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -445,6 +467,33 @@ fn dataset(layout: &AreaChartLayout) -> Dataset {
     )
 }
 
+fn legend_items(layout: &AreaChartLayout) -> Vec<LegendItem> {
+    layout
+        .bands
+        .iter()
+        .map(|band| {
+            let mut color = band.color;
+            color[3] = 1.0;
+            LegendItem::new(band.series.clone(), color)
+        })
+        .collect()
+}
+
+fn snap_targets(layout: &AreaChartLayout) -> Vec<SnapTarget> {
+    layout
+        .bands
+        .iter()
+        .flat_map(|band| {
+            band.upper.iter().enumerate().map(|(index, point)| {
+                SnapTarget::new(point[0], point[1], SnapKind::Point)
+                    .with_radius(6.0)
+                    .with_label(format!("{} top {}", band.series, index + 1))
+                    .with_priority(1)
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 struct AreaMark {
     id: MarkId,
@@ -512,11 +561,16 @@ impl Mark for AreaMark {
     fn pick(&self, _ctx: &PickCtx<'_>, point: (f32, f32)) -> Option<PickHit> {
         let (px, py) = point;
         // Walk bands top-down (later-drawn series on top).
-        for (row, band) in self.layout.bands.iter().enumerate().rev() {
+        for (band_index, band) in self.layout.bands.iter().enumerate().rev() {
             if band_contains(band, [px, py]) {
+                let row_offset = self.layout.bands[..band_index]
+                    .iter()
+                    .map(|band| band.upper.len())
+                    .sum::<usize>();
+                let point_index = nearest_upper_point_index(band, [px, py]);
                 return Some(PickHit {
                     mark: self.id,
-                    row: Some(row),
+                    row: Some(row_offset + point_index),
                     distance: 0.0,
                     payload: None,
                 });
@@ -532,6 +586,19 @@ impl Mark for AreaMark {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+fn nearest_upper_point_index(band: &AreaBand, point: [f32; 2]) -> usize {
+    band.upper
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let da = (a[0] - point[0]).mul_add(a[0] - point[0], (a[1] - point[1]).powi(2));
+            let db = (b[0] - point[0]).mul_add(b[0] - point[0], (b[1] - point[1]).powi(2));
+            da.total_cmp(&db)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(0)
 }
 
 fn band_contains(band: &AreaBand, p: [f32; 2]) -> bool {
@@ -636,6 +703,7 @@ impl Mark for AreaLineMark {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::{Column, Guide, PickCtx, TooltipValueFormat};
 
     fn sample_two_series() -> Vec<AreaDatum> {
         let mut v = Vec::new();
@@ -673,6 +741,111 @@ mod tests {
             )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn emits_semantic_guides_and_snap_targets_for_all_stack_modes() {
+        for stack in [
+            StackMode::Overlap,
+            StackMode::Stacked,
+            StackMode::Normalized,
+        ] {
+            let chart = AreaChartSpec::new(sample_two_series())
+                .with_options(AreaChartOptions {
+                    stack,
+                    ..AreaChartOptions::default()
+                })
+                .build_chart(
+                    berthacharts_core::Workspace::new(),
+                    ChartSize::new(600, 400),
+                )
+                .expect("chart");
+
+            assert_eq!(chart.snap_targets().len(), 20, "{stack:?}");
+
+            let legend = chart
+                .scene()
+                .guides
+                .iter()
+                .find_map(|guide| match guide {
+                    Guide::Legend(legend) => Some(legend),
+                    _ => None,
+                })
+                .expect("legend guide");
+            assert_eq!(legend.items.len(), 2, "{stack:?}");
+            assert_eq!(legend.items[0].label, "a");
+            assert_eq!(legend.items[1].label, "b");
+
+            let tooltip = chart
+                .scene()
+                .guides
+                .iter()
+                .find_map(|guide| match guide {
+                    Guide::Tooltip(tooltip) => Some(tooltip),
+                    _ => None,
+                })
+                .expect("tooltip guide");
+            assert_eq!(tooltip.title_column.as_deref(), Some("series"));
+            assert_eq!(tooltip.fields.len(), 3);
+            assert_eq!(tooltip.fields[0].label, "Series");
+            assert_eq!(tooltip.fields[0].column, "series");
+            assert_eq!(tooltip.fields[0].format, TooltipValueFormat::Label);
+            assert_eq!(tooltip.fields[1].label, "X");
+            assert_eq!(tooltip.fields[1].column, "x");
+            assert_eq!(
+                tooltip.fields[1].format,
+                TooltipValueFormat::Number { decimals: 1 }
+            );
+            assert_eq!(tooltip.fields[2].label, "Y");
+            assert_eq!(tooltip.fields[2].column, "y");
+            assert_eq!(
+                tooltip.fields[2].format,
+                TooltipValueFormat::Number { decimals: 1 }
+            );
+        }
+    }
+
+    #[test]
+    fn area_pick_rows_align_with_point_tooltip_dataset() {
+        let workspace = berthacharts_core::Workspace::new();
+        let chart = AreaChartSpec::new(sample_two_series())
+            .build_chart(workspace.clone(), ChartSize::new(600, 400))
+            .expect("chart");
+
+        let mark = chart.scene().layers[0].marks[0]
+            .as_any()
+            .downcast_ref::<AreaMark>()
+            .expect("area mark");
+        let point_index = 3;
+        let band_index = 1;
+        let point = mark.layout.bands[band_index].upper[point_index];
+
+        let coord = workspace.coord(COORD).expect("coord");
+        let scales = workspace.scales();
+        let datasets = workspace.datasets();
+        let selection = workspace.selection();
+        let ctx = PickCtx::new(
+            coord.as_ref(),
+            &scales,
+            &datasets,
+            &selection,
+            chart.scene().viewport.plot_area,
+            1.0,
+        );
+
+        let hit = mark.pick(&ctx, (point[0], point[1])).expect("hit");
+        let row = hit.row.expect("row");
+        assert_eq!(
+            row,
+            band_index * mark.layout.bands[band_index].upper.len() + point_index
+        );
+
+        let dataset = workspace.dataset(DATASET).expect("dataset");
+        let series = match dataset.column("series").expect("series").as_ref() {
+            Column::Utf8(data) => data,
+            other => panic!("expected utf8 series column, got {}", other.dtype()),
+        };
+        assert_eq!(series.values[row].as_ref(), "b");
     }
 
     #[test]

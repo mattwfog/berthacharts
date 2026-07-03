@@ -522,11 +522,12 @@ impl SankeySpec {
         flow_scale: f32,
     ) -> Result<Vec<SankeyRibbon>, SankeyError> {
         let index = layout_node_lookup(nodes);
-        let mut source_offsets = vec![0.0; nodes.len()];
-        let mut target_offsets = vec![0.0; nodes.len()];
-        let mut ribbons = Vec::with_capacity(self.links.len());
+        let mut source_indices = Vec::with_capacity(self.links.len());
+        let mut target_indices = Vec::with_capacity(self.links.len());
+        let mut outgoing = vec![Vec::<usize>::new(); nodes.len()];
+        let mut incoming = vec![Vec::<usize>::new(); nodes.len()];
 
-        for link in &self.links {
+        for (link_index, link) in self.links.iter().enumerate() {
             let source =
                 *index
                     .get(link.source.as_str())
@@ -539,15 +540,59 @@ impl SankeySpec {
                     .ok_or_else(|| SankeyError::MissingNode {
                         id: link.target.clone(),
                     })?;
+            source_indices.push(source);
+            target_indices.push(target);
+            outgoing[source].push(link_index);
+            incoming[target].push(link_index);
+        }
+
+        let mut source_y0_by_link = vec![0.0; self.links.len()];
+        let mut target_y0_by_link = vec![0.0; self.links.len()];
+
+        for (source_index, link_indices) in outgoing.iter_mut().enumerate() {
+            link_indices.sort_by(|&left, &right| {
+                let left_center = node_center_y(&nodes[target_indices[left]]);
+                let right_center = node_center_y(&nodes[target_indices[right]]);
+                left_center
+                    .partial_cmp(&right_center)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(left.cmp(&right))
+            });
+            let mut offset = 0.0;
+            for &link_index in link_indices.iter() {
+                source_y0_by_link[link_index] = nodes[source_index].y + offset;
+                offset += self.links[link_index].value * flow_scale;
+            }
+        }
+
+        for (target_index, link_indices) in incoming.iter_mut().enumerate() {
+            link_indices.sort_by(|&left, &right| {
+                let left_center = node_center_y(&nodes[source_indices[left]]);
+                let right_center = node_center_y(&nodes[source_indices[right]]);
+                left_center
+                    .partial_cmp(&right_center)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(left.cmp(&right))
+            });
+            let mut offset = 0.0;
+            for &link_index in link_indices.iter() {
+                target_y0_by_link[link_index] = nodes[target_index].y + offset;
+                offset += self.links[link_index].value * flow_scale;
+            }
+        }
+
+        let mut ribbons = Vec::with_capacity(self.links.len());
+
+        for (link_index, link) in self.links.iter().enumerate() {
+            let source = source_indices[link_index];
+            let target = target_indices[link_index];
             let source_node = &nodes[source];
             let target_node = &nodes[target];
             let height = link.value * flow_scale;
-            let source_y0 = source_node.y + source_offsets[source];
+            let source_y0 = source_y0_by_link[link_index];
             let source_y1 = source_y0 + height;
-            let target_y0 = target_node.y + target_offsets[target];
+            let target_y0 = target_y0_by_link[link_index];
             let target_y1 = target_y0 + height;
-            source_offsets[source] += height;
-            target_offsets[target] += height;
             ribbons.push(SankeyRibbon {
                 source: link.source.clone(),
                 target: link.target.clone(),
@@ -1412,6 +1457,10 @@ fn layout_node_lookup(nodes: &[SankeyLayoutNode]) -> AHashMap<&str, usize> {
         .collect()
 }
 
+fn node_center_y(node: &SankeyLayoutNode) -> f32 {
+    node.y + node.height() * 0.5
+}
+
 fn infer_node_order(flows: &[SankeyFlow]) -> Vec<String> {
     let mut seen = AHashSet::new();
     let mut nodes = Vec::new();
@@ -1726,6 +1775,76 @@ mod tests {
                 assert_near(y1, node.y2());
             }
         }
+    }
+
+    #[test]
+    fn sankey_orders_offsets_by_adjacent_node_centers_without_reordering_rows() {
+        let spec = SankeySpec::new(
+            vec![
+                SankeyNode::new("start", "Start", 0, [0.10, 0.42, 0.76]),
+                SankeyNode::new("top", "Top", 1, [0.16, 0.55, 0.84]).with_order(0),
+                SankeyNode::new("bottom", "Bottom", 1, [0.18, 0.63, 0.68]).with_order(1),
+                SankeyNode::new("in_top", "In top", 0, [0.32, 0.68, 0.51]).with_order(0),
+                SankeyNode::new("in_bottom", "In bottom", 0, [0.49, 0.63, 0.42]).with_order(1),
+                SankeyNode::new("end", "End", 1, [0.17, 0.64, 0.74]).with_order(2),
+            ],
+            vec![
+                SankeyLink::new(
+                    "start",
+                    "bottom",
+                    10.0,
+                    "flow",
+                    rgba(0.05, 0.58, 0.64, 0.58),
+                ),
+                SankeyLink::new("start", "top", 10.0, "flow", rgba(0.07, 0.45, 0.78, 0.62)),
+                SankeyLink::new(
+                    "in_bottom",
+                    "end",
+                    10.0,
+                    "flow",
+                    rgba(0.38, 0.53, 0.28, 0.46),
+                ),
+                SankeyLink::new("in_top", "end", 10.0, "flow", rgba(0.12, 0.60, 0.43, 0.54)),
+            ],
+        );
+
+        let layout = spec.layout(ChartSize::new(620, 420)).unwrap();
+
+        assert_eq!(layout.ribbons[0].target, "bottom");
+        assert_eq!(layout.ribbons[1].target, "top");
+        assert!(
+            layout.ribbons[1].source_y0 < layout.ribbons[0].source_y0,
+            "source offsets should follow target vertical order while rows stay in input order"
+        );
+
+        assert_eq!(layout.ribbons[2].source, "in_bottom");
+        assert_eq!(layout.ribbons[3].source, "in_top");
+        assert!(
+            layout.ribbons[3].target_y0 < layout.ribbons[2].target_y0,
+            "target offsets should follow source vertical order while rows stay in input order"
+        );
+
+        let workspace = Workspace::new();
+        let chart = spec
+            .try_build_chart(workspace.clone(), ChartSize::new(620, 420))
+            .unwrap();
+        assert!(!chart.scene().layers.is_empty());
+
+        let dataset = workspace.dataset(LINK_DATASET).expect("link dataset");
+        let link_column = dataset.column("link").expect("link column");
+        let Column::Utf8(values) = link_column.as_ref() else {
+            panic!("link column should be utf8");
+        };
+        let rows: Vec<&str> = values.values.iter().map(AsRef::as_ref).collect();
+        assert_eq!(
+            rows,
+            vec![
+                "start to bottom",
+                "start to top",
+                "in_bottom to end",
+                "in_top to end"
+            ]
+        );
     }
 
     #[test]
