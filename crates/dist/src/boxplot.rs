@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PickCtx, PickHit,
-    PointPrim, Rect, RectPrim, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PickCtx, PickHit,
+    PointPrim, Rect, RectPrim, Scale, ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet,
+    TessellateCtx, TooltipField, TooltipGuide, Workspace,
 };
 
 const GROUP_DATASET: DatasetId = DatasetId::new(0);
@@ -226,6 +228,41 @@ impl ChartSpec for BoxPlotSpec {
             z: 0,
             clip: None,
         });
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                BOX_MARK,
+                GROUP_DATASET,
+                vec![
+                    TooltipField::new("Median", "median").as_number(2),
+                    TooltipField::new("Q1", "q1").as_number(2),
+                    TooltipField::new("Q3", "q3").as_number(2),
+                    TooltipField::new("Lower", "lower").as_number(2),
+                    TooltipField::new("Upper", "upper").as_number(2),
+                    TooltipField::new("N", "count").as_integer(),
+                ],
+            )
+            .with_title_column("label"),
+        ));
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                OUTLIER_MARK,
+                OUTLIER_DATASET,
+                vec![
+                    TooltipField::new("Group", "group").as_label(),
+                    TooltipField::new("Outlier", "value").as_number(2),
+                ],
+            )
+            .with_title_column("group"),
+        ));
+        scene.guides.push(Guide::Labels(
+            LabelGuide::new(group_labels(&layout))
+                .with_collision_padding(3.0)
+                .with_max_visible(layout.groups.len()),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, self.options.outlier_radius))
+                .with_name("boxplot summaries"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -354,12 +391,16 @@ fn group_dataset(layout: &BoxPlotLayout) -> Dataset {
     let mut median: Vec<f32> = Vec::new();
     let mut q1: Vec<f32> = Vec::new();
     let mut q3: Vec<f32> = Vec::new();
+    let mut lower: Vec<f32> = Vec::new();
+    let mut upper: Vec<f32> = Vec::new();
     let mut count: Vec<i64> = Vec::new();
     for g in &layout.groups {
         label.push(Arc::from(g.label.as_str()));
         median.push(g.stats.median);
         q1.push(g.stats.q1);
         q3.push(g.stats.q3);
+        lower.push(g.stats.lower_whisker);
+        upper.push(g.stats.upper_whisker);
         count.push(g.stats.count as i64);
     }
     Dataset::new(
@@ -370,31 +411,82 @@ fn group_dataset(layout: &BoxPlotLayout) -> Dataset {
             ("median".to_string(), Column::F32(ColumnData::new(median))),
             ("q1".to_string(), Column::F32(ColumnData::new(q1))),
             ("q3".to_string(), Column::F32(ColumnData::new(q3))),
+            ("lower".to_string(), Column::F32(ColumnData::new(lower))),
+            ("upper".to_string(), Column::F32(ColumnData::new(upper))),
             ("count".to_string(), Column::I64(ColumnData::new(count))),
         ],
     )
 }
 
 fn outlier_dataset(layout: &BoxPlotLayout) -> Dataset {
-    let mut g_idx: Vec<i64> = Vec::new();
+    let mut group: Vec<Arc<str>> = Vec::new();
+    let mut value: Vec<f32> = Vec::new();
     let mut x: Vec<f32> = Vec::new();
     let mut y: Vec<f32> = Vec::new();
-    for (gi, g) in layout.groups.iter().enumerate() {
-        for &v in &g.y_outliers {
-            g_idx.push(gi as i64);
+    for g in &layout.groups {
+        for (&outlier, &y_px) in g.stats.outliers.iter().zip(&g.y_outliers) {
+            group.push(Arc::from(g.label.as_str()));
+            value.push(outlier);
             x.push(g.center_x);
-            y.push(v);
+            y.push(y_px);
         }
     }
     Dataset::new(
         OUTLIER_DATASET,
         1,
         vec![
-            ("group".to_string(), Column::I64(ColumnData::new(g_idx))),
+            ("group".to_string(), Column::Utf8(ColumnData::new(group))),
+            ("value".to_string(), Column::F32(ColumnData::new(value))),
             ("x".to_string(), Column::F32(ColumnData::new(x))),
             ("y".to_string(), Column::F32(ColumnData::new(y))),
         ],
     )
+}
+
+fn group_labels(layout: &BoxPlotLayout) -> Vec<LabelItem> {
+    layout
+        .groups
+        .iter()
+        .map(|group| {
+            LabelItem::new(group.center_x, group.y_lower + 12.0, group.label.clone())
+                .with_anchor(LabelAnchor::Bottom)
+                .with_kind(LabelKind::Column)
+                .with_priority(LabelPriority::Important)
+        })
+        .collect()
+}
+
+fn snap_targets(layout: &BoxPlotLayout, outlier_radius: f32) -> Vec<SnapTarget> {
+    let mut targets = Vec::new();
+    for group in &layout.groups {
+        targets.push(
+            SnapTarget::new(group.center_x, group.y_median, SnapKind::Center)
+                .with_radius(7.0)
+                .with_label(format!("{} median", group.label))
+                .with_priority(3),
+        );
+        targets.push(
+            SnapTarget::new(group.center_x, group.y_upper, SnapKind::Point)
+                .with_radius(6.0)
+                .with_label(format!("{} upper whisker", group.label))
+                .with_priority(2),
+        );
+        targets.push(
+            SnapTarget::new(group.center_x, group.y_lower, SnapKind::Point)
+                .with_radius(6.0)
+                .with_label(format!("{} lower whisker", group.label))
+                .with_priority(2),
+        );
+        for (&outlier, &y) in group.stats.outliers.iter().zip(&group.y_outliers) {
+            targets.push(
+                SnapTarget::new(group.center_x, y, SnapKind::Point)
+                    .with_radius((outlier_radius + 4.0).clamp(5.0, 12.0))
+                    .with_label(format!("{} outlier {:.1}", group.label, outlier))
+                    .with_priority(1),
+            );
+        }
+    }
+    targets
 }
 
 #[derive(Debug, Clone)]
@@ -589,7 +681,25 @@ impl Mark for OutlierMark {
         Geometry::Points(points)
     }
 
-    fn pick(&self, _ctx: &PickCtx<'_>, _point: (f32, f32)) -> Option<PickHit> {
+    fn pick(&self, _ctx: &PickCtx<'_>, point: (f32, f32)) -> Option<PickHit> {
+        let (px, py) = point;
+        let mut row = 0usize;
+        for g in &self.layout.groups {
+            for &y in &g.y_outliers {
+                let dx = px - g.center_x;
+                let dy = py - y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance <= self.radius + 2.0 {
+                    return Some(PickHit {
+                        mark: self.id,
+                        row: Some(row),
+                        distance,
+                        payload: None,
+                    });
+                }
+                row += 1;
+            }
+        }
         None
     }
 
@@ -629,6 +739,7 @@ impl Mark for OutlierMark {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::{Guide, SnapKind};
 
     #[test]
     fn empty_spec_rejected() {
@@ -681,5 +792,52 @@ mod tests {
             )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn build_chart_exposes_summary_tooltips_labels_and_snap_targets() {
+        let chart = BoxPlotSpec::new(vec![
+            BoxPlotGroup::new("A", (1..=8).map(|i| i as f32).collect()),
+            BoxPlotGroup::new(
+                "B",
+                (1..=10)
+                    .map(|i| i as f32)
+                    .chain(std::iter::once(100.0))
+                    .collect(),
+            ),
+        ])
+        .build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(420, 300),
+        )
+        .expect("chart");
+
+        let tooltip_count = chart
+            .scene()
+            .guides
+            .iter()
+            .filter(|guide| matches!(guide, Guide::Tooltip(_)))
+            .count();
+        assert_eq!(tooltip_count, 2);
+
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(labels),
+                _ => None,
+            })
+            .expect("label guide");
+        assert!(labels.items.iter().any(|item| item.text == "A"));
+        assert!(labels.items.iter().any(|item| item.text == "B"));
+
+        let targets = chart.snap_targets();
+        assert!(targets
+            .iter()
+            .any(|target| target.kind == SnapKind::Center
+                && target.label.as_deref() == Some("A median")));
+        assert!(targets.iter().any(|target| target.kind == SnapKind::Point
+            && target.label.as_deref() == Some("B outlier 100.0")));
     }
 }
