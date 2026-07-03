@@ -10,9 +10,10 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Guide, LabelGuide, LabelItem, LabelPriority, Layer, LayerId, LinePrim,
-    LinearScale, Mark, MarkId, PickCtx, PickHit, PointPrim, Rect, Scale, ScaleId, Scene,
-    TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PickCtx, PickHit,
+    PointPrim, Rect, Scale, ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet, TessellateCtx,
+    TooltipField, TooltipGuide, Workspace,
 };
 
 const NODE_DATASET: DatasetId = DatasetId::new(0);
@@ -274,7 +275,7 @@ impl ChartSpec for TreeSpec {
         workspace.upsert_scale(Y_SCALE, y_scale);
         workspace.upsert_coord(COORD, Arc::new(CartesianCoord::new(X_SCALE, Y_SCALE)));
         workspace.upsert_dataset(node_dataset(&layout));
-        workspace.upsert_dataset(edge_dataset(&layout));
+        workspace.upsert_dataset(edge_dataset(&layout, &self.nodes));
 
         let edge_mark: Arc<dyn Mark> = Arc::new(TreeEdgeMark::new(
             EDGE_MARK,
@@ -295,7 +296,11 @@ impl ChartSpec for TreeSpec {
         });
 
         if self.options.show_labels {
-            let labels = build_labels(&layout, self.options.max_visible_labels);
+            let labels = build_labels(
+                &layout,
+                self.options.max_visible_labels,
+                self.options.orientation,
+            );
             if !labels.is_empty() {
                 let mut guide = LabelGuide::new(labels).with_collision_padding(3.0);
                 if let Some(cap) = self.options.max_visible_labels {
@@ -304,6 +309,34 @@ impl ChartSpec for TreeSpec {
                 scene.guides.push(Guide::Labels(guide));
             }
         }
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                NODE_MARK,
+                NODE_DATASET,
+                vec![
+                    TooltipField::new("Id", "id").as_label(),
+                    TooltipField::new("Depth", "depth").as_integer(),
+                    TooltipField::new("Radius", "radius"),
+                    TooltipField::new("X", "x"),
+                    TooltipField::new("Y", "y"),
+                ],
+            )
+            .with_title_column("label"),
+        ));
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                EDGE_MARK,
+                EDGE_DATASET,
+                vec![
+                    TooltipField::new("Parent", "parent").as_label(),
+                    TooltipField::new("Child", "child").as_label(),
+                ],
+            )
+            .with_title_column("link"),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, &self.nodes)).with_name("tree anchors"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -478,7 +511,11 @@ fn compute_layout(
     })
 }
 
-fn build_labels(layout: &TreeLayout, max_visible: Option<usize>) -> Vec<LabelItem> {
+fn build_labels(
+    layout: &TreeLayout,
+    max_visible: Option<usize>,
+    orientation: TreeOrientation,
+) -> Vec<LabelItem> {
     let mut indices: Vec<usize> = (0..layout.nodes.len()).collect();
     indices.sort_by_key(|&i| layout.nodes[i].depth);
     let take = max_visible
@@ -489,7 +526,15 @@ fn build_labels(layout: &TreeLayout, max_visible: Option<usize>) -> Vec<LabelIte
         .into_iter()
         .map(|i| {
             let n = &layout.nodes[i];
-            LabelItem::new(n.x, n.y - n.radius - 6.0, n.label.clone())
+            let (x, y, anchor) = match orientation {
+                TreeOrientation::TopDown => (n.x, n.y - n.radius - 6.0, LabelAnchor::Top),
+                TreeOrientation::BottomUp => (n.x, n.y + n.radius + 6.0, LabelAnchor::Bottom),
+                TreeOrientation::LeftRight => (n.x + n.radius + 8.0, n.y, LabelAnchor::Right),
+                TreeOrientation::RightLeft => (n.x - n.radius - 8.0, n.y, LabelAnchor::Left),
+            };
+            LabelItem::new(x, y, n.label.clone())
+                .with_anchor(anchor)
+                .with_kind(LabelKind::Node)
                 .with_priority(LabelPriority::Important)
         })
         .collect()
@@ -497,33 +542,53 @@ fn build_labels(layout: &TreeLayout, max_visible: Option<usize>) -> Vec<LabelIte
 
 fn node_dataset(layout: &TreeLayout) -> Dataset {
     let mut id_col: Vec<Arc<str>> = Vec::with_capacity(layout.nodes.len());
+    let mut label_col: Vec<Arc<str>> = Vec::with_capacity(layout.nodes.len());
     let mut x_col = Vec::with_capacity(layout.nodes.len());
     let mut y_col = Vec::with_capacity(layout.nodes.len());
     let mut depth_col = Vec::with_capacity(layout.nodes.len());
+    let mut radius_col = Vec::with_capacity(layout.nodes.len());
     for n in &layout.nodes {
         id_col.push(Arc::from(n.id.as_str()));
+        label_col.push(Arc::from(n.label.as_str()));
         x_col.push(n.x);
         y_col.push(n.y);
         depth_col.push(n.depth as i64);
+        radius_col.push(n.radius);
     }
     Dataset::new(
         NODE_DATASET,
         1,
         vec![
             ("id".to_string(), Column::Utf8(ColumnData::new(id_col))),
+            (
+                "label".to_string(),
+                Column::Utf8(ColumnData::new(label_col)),
+            ),
             ("x".to_string(), Column::F32(ColumnData::new(x_col))),
             ("y".to_string(), Column::F32(ColumnData::new(y_col))),
             ("depth".to_string(), Column::I64(ColumnData::new(depth_col))),
+            (
+                "radius".to_string(),
+                Column::F32(ColumnData::new(radius_col)),
+            ),
         ],
     )
 }
 
-fn edge_dataset(layout: &TreeLayout) -> Dataset {
+fn edge_dataset(layout: &TreeLayout, input_nodes: &[TreeNode]) -> Dataset {
+    let mut link_col: Vec<Arc<str>> = Vec::with_capacity(layout.edges.len());
+    let mut parent_col: Vec<Arc<str>> = Vec::with_capacity(layout.edges.len());
+    let mut child_col: Vec<Arc<str>> = Vec::with_capacity(layout.edges.len());
     let mut px = Vec::with_capacity(layout.edges.len());
     let mut py = Vec::with_capacity(layout.edges.len());
     let mut cx = Vec::with_capacity(layout.edges.len());
     let mut cy = Vec::with_capacity(layout.edges.len());
-    for e in &layout.edges {
+    let metadata = tree_edge_metadata(input_nodes);
+    debug_assert_eq!(layout.edges.len(), metadata.len());
+    for (e, (parent, child)) in layout.edges.iter().zip(metadata.iter()) {
+        link_col.push(Arc::from(format!("{parent} to {child}")));
+        parent_col.push(Arc::from(parent.as_str()));
+        child_col.push(Arc::from(child.as_str()));
         px.push(e.parent[0]);
         py.push(e.parent[1]);
         cx.push(e.child[0]);
@@ -533,12 +598,60 @@ fn edge_dataset(layout: &TreeLayout) -> Dataset {
         EDGE_DATASET,
         1,
         vec![
+            ("link".to_string(), Column::Utf8(ColumnData::new(link_col))),
+            (
+                "parent".to_string(),
+                Column::Utf8(ColumnData::new(parent_col)),
+            ),
+            (
+                "child".to_string(),
+                Column::Utf8(ColumnData::new(child_col)),
+            ),
             ("parent_x".to_string(), Column::F32(ColumnData::new(px))),
             ("parent_y".to_string(), Column::F32(ColumnData::new(py))),
             ("child_x".to_string(), Column::F32(ColumnData::new(cx))),
             ("child_y".to_string(), Column::F32(ColumnData::new(cy))),
         ],
     )
+}
+
+fn snap_targets(layout: &TreeLayout, input_nodes: &[TreeNode]) -> Vec<SnapTarget> {
+    let mut targets = Vec::with_capacity(layout.nodes.len() + layout.edges.len());
+    targets.extend(layout.nodes.iter().map(|node| {
+        SnapTarget::new(node.x, node.y, SnapKind::Node)
+            .with_radius((node.radius + 4.0).clamp(6.0, 14.0))
+            .with_label(format!("{} node", node.label))
+            .with_priority(if node.depth == 0 { 4 } else { 3 })
+    }));
+    let metadata = tree_edge_metadata(input_nodes);
+    targets.extend(
+        layout
+            .edges
+            .iter()
+            .zip(metadata.iter())
+            .map(|(edge, (parent, child))| {
+                SnapTarget::new(
+                    (edge.parent[0] + edge.child[0]) * 0.5,
+                    (edge.parent[1] + edge.child[1]) * 0.5,
+                    SnapKind::Edge,
+                )
+                .with_radius(6.0)
+                .with_label(format!("{parent} to {child}"))
+                .with_priority(1)
+            }),
+    );
+    targets
+}
+
+fn tree_edge_metadata(input_nodes: &[TreeNode]) -> Vec<(String, String)> {
+    input_nodes
+        .iter()
+        .filter_map(|node| {
+            node.parent
+                .as_ref()
+                .map(|parent| (parent.clone(), node.id.clone()))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -817,6 +930,50 @@ mod tests {
         )
         .expect("layout");
         assert!(layout.nodes[0].x < layout.nodes[1].x);
+    }
+
+    #[test]
+    fn left_right_labels_are_offset_beside_nodes() {
+        let nodes = vec![
+            TreeNode::root("r", "Root"),
+            TreeNode::child("c", "Child", "r"),
+        ];
+        let options = TreeOptions {
+            orientation: TreeOrientation::LeftRight,
+            ..TreeOptions::default()
+        };
+        let layout = compute_layout(
+            &nodes,
+            &[],
+            &options,
+            ChartSize::new(400, 300).full_viewport().plot_area,
+        )
+        .expect("layout");
+        let chart = TreeSpec::new(nodes, vec![])
+            .with_options(options)
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .expect("chart");
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(labels),
+                _ => None,
+            })
+            .expect("label guide");
+        let root_label = labels
+            .items
+            .iter()
+            .find(|label| label.text == "Root")
+            .expect("root label");
+
+        assert!(root_label.x > layout.nodes[0].x + layout.nodes[0].radius);
+        assert_eq!(root_label.y, layout.nodes[0].y);
+        assert_eq!(root_label.anchor, berthacharts_core::LabelAnchor::Right);
     }
 
     #[test]

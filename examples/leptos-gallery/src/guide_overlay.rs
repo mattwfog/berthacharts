@@ -192,31 +192,76 @@ fn render_label_guide_html(html: &mut String, guide: &LabelGuide, width: u32, he
             html.push_str(&format!("<em>{}</em>", escape_html(detail)));
         }
         if let Some(tooltip) = &item.tooltip {
-            render_label_tooltip_html(html, tooltip, item.y < 190.0);
+            render_label_tooltip_html_with_align(
+                html,
+                tooltip,
+                item.y < height as f32 * 0.5,
+                label_tooltip_align(item.x, width as f32),
+            );
         }
         html.push_str("</span>");
     }
 }
 
+#[cfg(test)]
 fn render_label_tooltip_html(html: &mut String, tooltip: &LabelTooltip, open_below: bool) {
+    render_label_tooltip_html_with_align(html, tooltip, open_below, LabelTooltipAlign::Center);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelTooltipAlign {
+    Start,
+    Center,
+    End,
+}
+
+fn label_tooltip_align(x: f32, width: f32) -> LabelTooltipAlign {
+    let edge_band = (width * 0.34).clamp(56.0, 112.0);
+    if x <= edge_band {
+        LabelTooltipAlign::Start
+    } else if x >= width - edge_band {
+        LabelTooltipAlign::End
+    } else {
+        LabelTooltipAlign::Center
+    }
+}
+
+fn render_label_tooltip_html_with_align(
+    html: &mut String,
+    tooltip: &LabelTooltip,
+    open_below: bool,
+    align: LabelTooltipAlign,
+) {
     let class = if open_below {
         "guide-label-tooltip guide-label-tooltip-below"
     } else {
         "guide-label-tooltip"
     };
-    html.push_str(&format!("<span class=\"{class}\">"));
     html.push_str(&format!(
-        "<span class=\"chart-tooltip-title\">{}</span>",
+        "<span class=\"{}{}\">",
+        class,
+        label_tooltip_align_class(align),
+    ));
+    html.push_str(&format!(
+        "<span class=\"chart-tooltip-title guide-label-tooltip-title\">{}</span>",
         escape_html(&tooltip.title)
     ));
     for row in &tooltip.rows {
         html.push_str(&format!(
-            "<span class=\"chart-tooltip-row\"><span>{}</span><strong>{}</strong></span>",
+            "<span class=\"chart-tooltip-row guide-label-tooltip-row\"><span class=\"guide-label-tooltip-key\">{}</span><strong class=\"guide-label-tooltip-value\">{}</strong></span>",
             escape_html(&row.label),
             escape_html(&row.value),
         ));
     }
     html.push_str("</span>");
+}
+
+fn label_tooltip_align_class(align: LabelTooltipAlign) -> &'static str {
+    match align {
+        LabelTooltipAlign::Start => " guide-label-tooltip-start",
+        LabelTooltipAlign::Center => "",
+        LabelTooltipAlign::End => " guide-label-tooltip-end",
+    }
 }
 
 fn place_label(
@@ -569,4 +614,49 @@ fn escape_html(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use berthacharts_core::LabelTooltipRow;
+
+    #[test]
+    fn label_tooltip_markup_uses_wrapping_row_classes() {
+        let tooltip = LabelTooltip::new(
+            "Very detailed node",
+            vec![LabelTooltipRow::new(
+                "A very long descriptive row label",
+                "A value that should be allowed to wrap inside the chart",
+            )],
+        );
+        let mut html = String::new();
+
+        render_label_tooltip_html(&mut html, &tooltip, true);
+
+        assert!(html.contains("guide-label-tooltip-title"));
+        assert!(html.contains("guide-label-tooltip-row"));
+        assert!(html.contains("guide-label-tooltip-key"));
+        assert!(html.contains("guide-label-tooltip-value"));
+    }
+
+    #[test]
+    fn label_tooltips_near_chart_edges_place_inward() {
+        let tooltip = LabelTooltip::new(
+            "Revenue cohort",
+            vec![LabelTooltipRow::new(
+                "Long cohort description",
+                "Enterprise expansion accounts",
+            )],
+        );
+        let guide = LabelGuide::new(vec![LabelItem::new(212.0, 18.0, "Segment")
+            .with_reposition(false)
+            .with_tooltip(tooltip)]);
+        let mut html = String::new();
+
+        render_label_guide_html(&mut html, &guide, 220, 120);
+
+        assert!(html.contains("guide-label-tooltip-below"));
+        assert!(html.contains("guide-label-tooltip-end"));
+    }
 }

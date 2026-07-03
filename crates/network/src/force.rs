@@ -13,9 +13,10 @@ use std::sync::Arc;
 use ahash::{AHashMap, AHashSet};
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Guide, LabelGuide, LabelItem, LabelPriority, Layer, LayerId, LinePrim,
-    LinearScale, Mark, MarkId, PathCommand, PathPrim, PickCtx, PickHit, PointPrim, Rect, Scale,
-    ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PathCommand, PathPrim,
+    PickCtx, PickHit, PointPrim, Rect, Scale, ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet,
+    TessellateCtx, TooltipField, TooltipGuide, Workspace,
 };
 
 /// How edges are drawn between nodes.
@@ -266,7 +267,7 @@ impl ChartSpec for ForceSpec {
         workspace.upsert_scale(Y_SCALE, y_scale);
         workspace.upsert_coord(COORD, Arc::new(CartesianCoord::new(X_SCALE, Y_SCALE)));
         workspace.upsert_dataset(node_dataset(&layout));
-        workspace.upsert_dataset(edge_dataset(&layout));
+        workspace.upsert_dataset(edge_dataset(&layout, &self.edges));
 
         let edge_mark: Arc<dyn Mark> = Arc::new(ForceEdgeMark::new(
             EDGE_MARK,
@@ -300,6 +301,34 @@ impl ChartSpec for ForceSpec {
                 scene.guides.push(Guide::Labels(guide));
             }
         }
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                NODE_MARK,
+                NODE_DATASET,
+                vec![
+                    TooltipField::new("Id", "id").as_label(),
+                    TooltipField::new("Radius", "radius"),
+                    TooltipField::new("X", "x"),
+                    TooltipField::new("Y", "y"),
+                ],
+            )
+            .with_title_column("label"),
+        ));
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                EDGE_MARK,
+                EDGE_DATASET,
+                vec![
+                    TooltipField::new("Source", "source").as_label(),
+                    TooltipField::new("Target", "target").as_label(),
+                    TooltipField::new("Weight", "weight"),
+                ],
+            )
+            .with_title_column("link"),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, &self.edges)).with_name("force graph anchors"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -574,30 +603,51 @@ fn simulate(
 
 fn node_dataset(layout: &ForceLayout) -> Dataset {
     let mut id_col: Vec<Arc<str>> = Vec::with_capacity(layout.nodes.len());
+    let mut label_col: Vec<Arc<str>> = Vec::with_capacity(layout.nodes.len());
     let mut x_col = Vec::with_capacity(layout.nodes.len());
     let mut y_col = Vec::with_capacity(layout.nodes.len());
+    let mut radius_col = Vec::with_capacity(layout.nodes.len());
     for node in &layout.nodes {
         id_col.push(Arc::from(node.id.as_str()));
+        label_col.push(Arc::from(node.label.as_str()));
         x_col.push(node.x);
         y_col.push(node.y);
+        radius_col.push(node.radius);
     }
     Dataset::new(
         NODE_DATASET,
         1,
         vec![
             ("id".to_string(), Column::Utf8(ColumnData::new(id_col))),
+            (
+                "label".to_string(),
+                Column::Utf8(ColumnData::new(label_col)),
+            ),
             ("x".to_string(), Column::F32(ColumnData::new(x_col))),
             ("y".to_string(), Column::F32(ColumnData::new(y_col))),
+            (
+                "radius".to_string(),
+                Column::F32(ColumnData::new(radius_col)),
+            ),
         ],
     )
 }
 
-fn edge_dataset(layout: &ForceLayout) -> Dataset {
+fn edge_dataset(layout: &ForceLayout, input_edges: &[ForceEdge]) -> Dataset {
+    debug_assert_eq!(layout.edges.len(), input_edges.len());
+    let mut link_col: Vec<Arc<str>> = Vec::with_capacity(layout.edges.len());
+    let mut source_col: Vec<Arc<str>> = Vec::with_capacity(layout.edges.len());
+    let mut target_col: Vec<Arc<str>> = Vec::with_capacity(layout.edges.len());
+    let mut weight_col = Vec::with_capacity(layout.edges.len());
     let mut sx = Vec::with_capacity(layout.edges.len());
     let mut sy = Vec::with_capacity(layout.edges.len());
     let mut tx = Vec::with_capacity(layout.edges.len());
     let mut ty = Vec::with_capacity(layout.edges.len());
-    for edge in &layout.edges {
+    for (edge, input) in layout.edges.iter().zip(input_edges) {
+        link_col.push(Arc::from(format!("{} to {}", input.source, input.target)));
+        source_col.push(Arc::from(input.source.as_str()));
+        target_col.push(Arc::from(input.target.as_str()));
+        weight_col.push(input.weight);
         sx.push(edge.source[0]);
         sy.push(edge.source[1]);
         tx.push(edge.target[0]);
@@ -607,6 +657,19 @@ fn edge_dataset(layout: &ForceLayout) -> Dataset {
         EDGE_DATASET,
         1,
         vec![
+            ("link".to_string(), Column::Utf8(ColumnData::new(link_col))),
+            (
+                "source".to_string(),
+                Column::Utf8(ColumnData::new(source_col)),
+            ),
+            (
+                "target".to_string(),
+                Column::Utf8(ColumnData::new(target_col)),
+            ),
+            (
+                "weight".to_string(),
+                Column::F32(ColumnData::new(weight_col)),
+            ),
             ("source_x".to_string(), Column::F32(ColumnData::new(sx))),
             ("source_y".to_string(), Column::F32(ColumnData::new(sy))),
             ("target_x".to_string(), Column::F32(ColumnData::new(tx))),
@@ -1039,9 +1102,36 @@ fn build_labels(layout: &ForceLayout, max_visible: Option<usize>) -> Vec<LabelIt
         .map(|(i, _)| {
             let n = &layout.nodes[i];
             LabelItem::new(n.x, n.y - n.radius - 6.0, n.label.clone())
+                .with_anchor(LabelAnchor::Top)
+                .with_kind(LabelKind::Node)
                 .with_priority(LabelPriority::Important)
         })
         .collect()
+}
+
+fn snap_targets(layout: &ForceLayout, input_edges: &[ForceEdge]) -> Vec<SnapTarget> {
+    let mut targets = Vec::with_capacity(layout.nodes.len() + layout.edges.len());
+    targets.extend(layout.nodes.iter().map(|node| {
+        SnapTarget::new(node.x, node.y, SnapKind::Node)
+            .with_radius((node.radius + 4.0).clamp(6.0, 14.0))
+            .with_label(format!("{} node", node.label))
+            .with_priority(if node.highlighted { 4 } else { 3 })
+    }));
+    targets.extend(layout.edges.iter().zip(input_edges).map(|(edge, input)| {
+        let (x, y) = if edge.self_loop {
+            (edge.source[0] + 24.0, edge.source[1])
+        } else {
+            (
+                (edge.source[0] + edge.target[0]) * 0.5,
+                (edge.source[1] + edge.target[1]) * 0.5,
+            )
+        };
+        SnapTarget::new(x, y, SnapKind::Edge)
+            .with_radius((edge.weight.max(0.0).sqrt() + 5.0).clamp(5.0, 12.0))
+            .with_label(format!("{} to {}", input.source, input.target))
+            .with_priority(1)
+    }));
+    targets
 }
 
 // ---------- Barnes-Hut quadtree ----------
@@ -1415,6 +1505,55 @@ mod tests {
         // After build, the node-mark's layout snapshot should reflect highlight state.
         // We can't easily inspect the Mark from outside; instead, verify build succeeds.
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn build_chart_exposes_force_tooltips_and_snap_targets() {
+        let spec = ForceSpec::new(
+            vec![
+                ForceNode::new("a", "Alpha").pinned_at(120.0, 100.0),
+                ForceNode::new("b", "Beta").pinned_at(260.0, 100.0),
+            ],
+            vec![ForceEdge::new("a", "b").with_weight(2.0)],
+        )
+        .with_options(ForceOptions {
+            iterations: 1,
+            ..ForceOptions::default()
+        });
+        let chart = spec
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .expect("chart builds");
+
+        let tooltip_count = chart
+            .scene()
+            .guides
+            .iter()
+            .filter(|guide| matches!(guide, Guide::Tooltip(_)))
+            .count();
+        assert_eq!(tooltip_count, 2);
+
+        let targets = chart.snap_targets();
+        assert_eq!(targets.len(), 3);
+        assert_eq!(
+            targets
+                .iter()
+                .filter(|target| target.kind == berthacharts_core::SnapKind::Node)
+                .count(),
+            2
+        );
+        assert_eq!(
+            targets
+                .iter()
+                .filter(|target| target.kind == berthacharts_core::SnapKind::Edge)
+                .count(),
+            1
+        );
+        assert!(targets
+            .iter()
+            .any(|target| target.label.as_deref() == Some("Alpha node")));
     }
 
     #[test]
