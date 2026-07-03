@@ -1,19 +1,22 @@
 # Bertha Charts
 
 A WebGL chart kernel for Rust and the web. Foundational primitives for
-sophisticated, analytically-deep data visualization, consumable from Rust and
-Leptos applications.
+sophisticated, analytically-deep data visualization, consumable from Rust,
+Leptos, and React applications.
 
-**Status:** v0.0.1 — pre-release. Core kernel, wgpu renderer, and a starter
-set of reusable chart specs are implemented. Public traits are not yet stable.
+**Status:** v0.0.2 — pre-release. Core kernel, wgpu renderer, starter chart
+specs, Rust facade crate, Leptos bindings, and public React/WASM npm bindings
+are implemented. Public Rust traits are not yet stable.
 
 ## Quick Start
 
-Use the facade crate for application code:
+### Rust
+
+Use the facade crate for Rust application code:
 
 ```toml
 [dependencies]
-berthacharts = "0.0.1"
+berthacharts = "0.0.2"
 ```
 
 When working from this repository instead of crates.io, use the local facade:
@@ -38,6 +41,41 @@ let spec = BarChartSpec::new(vec![
 let chart = spec.build(ChartSize::new(640, 360))?;
 assert!(!chart.scene().layers.is_empty());
 # Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+### React
+
+Install the npm package:
+
+```sh
+npm install @berthacharts/react
+```
+
+Render a chart with typed React props. The React layer owns canvas lifecycle,
+WASM initialization, resize handling, cleanup, and the DOM guide overlay.
+
+```tsx
+import { BarChart } from "@berthacharts/react";
+
+export function RevenueChart() {
+  return (
+    <BarChart
+      data={[
+        { label: "Q1", value: 24 },
+        { label: "Q2", value: 31 },
+        { label: "Q3", value: 37 },
+      ]}
+      options={{ target: 30, xLabel: "Quarter", yLabel: "Revenue" }}
+      style={{ height: 320 }}
+    />
+  );
+}
+```
+
+Advanced users can import the raw wasm-pack API from the `./wasm` export:
+
+```ts
+import initWasm, { BerthaChart } from "@berthacharts/react/wasm";
 ```
 
 Default features include `charts` and `transforms`. Optional feature flags for
@@ -80,10 +118,10 @@ let chart = BarChartSpec::new(vec![BarDatum::new("A", 1.0)])
 - **Renderer** (`renderer-wgpu`) — wgpu backend targeting WebGL2 on the web
   and native elsewhere.
 - **Bindings** — `berthacharts-leptos` provides Rust-native Leptos bindings.
+  `@berthacharts/react` provides npm React components plus the raw WASM API.
 
-Incubating crates for annotations, distribution marks, finance charts, and
-React bindings are kept private in this repository until they have usable
-public APIs.
+Incubating crates for annotations, distribution marks, and finance charts are
+kept private in this repository until they have usable public APIs.
 
 A working Leptos example wiring core → renderer → DOM lives under
 `examples/leptos-gallery/`.
@@ -109,6 +147,9 @@ cargo test --workspace
 cargo test -p berthacharts
 cargo test -p berthacharts --features network,geo,stats
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+scripts/build-npm.sh
+(cd crates/bindings-react/pkg && npm --cache /private/tmp/bertha-npm-cache pack --dry-run)
+node scripts/check-npm-react.mjs crates/bindings-react/pkg
 ```
 
 `cargo package -p berthacharts` requires the leaf crates

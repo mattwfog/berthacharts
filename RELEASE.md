@@ -14,6 +14,9 @@ cargo clippy --workspace --all-targets
 cargo test --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 cargo build --target wasm32-unknown-unknown -p berthacharts-leptos
+scripts/build-npm.sh
+(cd crates/bindings-react/pkg && npm --cache /private/tmp/bertha-npm-cache pack --dry-run)
+node scripts/check-npm-react.mjs crates/bindings-react/pkg
 ```
 
 Run package verification for each publishable crate before publishing it:
@@ -39,9 +42,27 @@ Publish crates in dependency order:
 After each `cargo publish -p <crate-name>`, wait for crates.io indexing before
 packaging or publishing crates that depend on it.
 
+## Npm Publish
+
+Build and verify the React package from the repository root:
+
+```sh
+scripts/build-npm.sh
+(cd crates/bindings-react/pkg && npm --cache /private/tmp/bertha-npm-cache pack --dry-run)
+node scripts/check-npm-react.mjs crates/bindings-react/pkg
+```
+
+Publish the generated package after verifying npm auth and access to the
+`@berthacharts` organization:
+
+```sh
+(cd crates/bindings-react/pkg && npm publish --access public)
+```
+
 ## Public Launch
 
 - Tag the release after all crates are published.
 - Verify README install instructions against the published facade crate.
+- Verify README install instructions against the published npm package.
 - Publish the hosted gallery from `examples/leptos-gallery`.
 - Add screenshots or GIFs of the gallery to the GitHub release notes.

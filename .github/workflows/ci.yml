@@ -72,3 +72,25 @@ jobs:
         run: |
           cargo build --target wasm32-unknown-unknown -p berthacharts-bindings-react
           cargo build --target wasm32-unknown-unknown -p berthacharts-leptos
+
+  npm-package:
+    name: npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build npm package
+        run: scripts/build-npm.sh
+      - name: Verify package tarball
+        working-directory: crates/bindings-react/pkg
+        run: npm --cache /tmp/bertha-npm-cache pack --dry-run
+      - name: Verify React exports
+        run: node scripts/check-npm-react.mjs crates/bindings-react/pkg
