@@ -35,6 +35,8 @@ async function main() {
     const expectedFunctions = [
       "BarChart",
       "LineChart",
+      "AreaChart",
+      "Sparkline",
       "ScatterPlot",
       "Heatmap",
       "Sankey",

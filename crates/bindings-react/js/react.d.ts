@@ -1,7 +1,14 @@
 import type { CSSProperties, ReactElement } from "react";
 import type { BerthaChart } from "./berthacharts_bindings_react";
 
-export type ChartType = "bar" | "line" | "scatter" | "heatmap" | "sankey";
+export type ChartType =
+  | "bar"
+  | "line"
+  | "area"
+  | "sparkline"
+  | "scatter"
+  | "heatmap"
+  | "sankey";
 
 export interface BarDatum {
   label: string;
@@ -13,6 +20,17 @@ export interface LineDatum {
   x: number;
   y: number;
   label?: string;
+}
+
+export interface AreaDatum {
+  series: string;
+  x: number;
+  y: number;
+}
+
+export interface SparklineDatum {
+  x: number;
+  y: number;
 }
 
 export interface ScatterDatum {
@@ -71,6 +89,37 @@ export interface LineChartOptions {
   show_points?: boolean;
 }
 
+export interface AreaChartOptions {
+  padding?: number;
+  stack?: "overlap" | "stacked" | "normalized";
+  overlapFillOpacity?: number;
+  overlap_fill_opacity?: number;
+  showLine?: boolean;
+  show_line?: boolean;
+  lineWidth?: number;
+  line_width?: number;
+  yDomain?: [number, number];
+  y_domain?: [number, number];
+}
+
+export interface SparklineOptions {
+  padding?: number;
+  stroke?: [number, number, number, number];
+  lineWidth?: number;
+  line_width?: number;
+  fill?: [number, number, number, number];
+  dots?: "none" | "min_max" | "minMax" | "first_last" | "firstLast" | "all";
+  dotColor?: [number, number, number, number];
+  dot_color?: [number, number, number, number];
+  dotRadius?: number;
+  dot_radius?: number;
+  baseline?: boolean;
+  baselineColor?: [number, number, number, number];
+  baseline_color?: [number, number, number, number];
+  yDomain?: [number, number];
+  y_domain?: [number, number];
+}
+
 export interface ScatterPlotOptions {
   xLabel?: string;
   yLabel?: string;
@@ -113,7 +162,16 @@ export interface LabelGuide {
   y: number;
   text: string;
   detail?: string;
-  anchor: "center" | "top" | "bottom" | "left" | "right";
+  anchor:
+    | "center"
+    | "top"
+    | "bottom"
+    | "left"
+    | "right"
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right";
 }
 
 export interface LegendItemGuide {
@@ -123,7 +181,13 @@ export interface LegendItemGuide {
 
 export interface LegendGuide {
   title?: string;
-  anchor: "top" | "bottom" | "top-left";
+  anchor:
+    | "top"
+    | "bottom"
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right";
   items: LegendItemGuide[];
 }
 
@@ -165,6 +229,11 @@ export interface BerthaChartCanvasProps<TData = unknown, TOptions = unknown>
 
 export type BarChartProps = CommonChartProps<BarDatum[], BarChartOptions>;
 export type LineChartProps = CommonChartProps<LineDatum[], LineChartOptions>;
+export type AreaChartProps = CommonChartProps<AreaDatum[], AreaChartOptions>;
+export type SparklineProps = CommonChartProps<
+  SparklineDatum[],
+  SparklineOptions
+>;
 export type ScatterPlotProps = CommonChartProps<
   ScatterDatum[],
   ScatterPlotOptions
@@ -202,6 +271,8 @@ export function BerthaChartCanvas<TData = unknown, TOptions = unknown>(
 
 export function BarChart(props: BarChartProps): ReactElement;
 export function LineChart(props: LineChartProps): ReactElement;
+export function AreaChart(props: AreaChartProps): ReactElement;
+export function Sparkline(props: SparklineProps): ReactElement;
 export function ScatterPlot(props: ScatterPlotProps): ReactElement;
 export function Heatmap(props: HeatmapProps): ReactElement;
 export function Sankey(props: SankeyProps): ReactElement;

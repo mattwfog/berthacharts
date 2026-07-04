@@ -9,8 +9,10 @@ use std::sync::Arc;
 
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PickCtx, PickHit,
-    Rect, RectPrim, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LegendAnchor, LegendGuide, LegendItem, LinePrim, LinearScale,
+    Mark, MarkId, PickCtx, PickHit, Rect, RectPrim, Scale, ScaleId, Scene, SnapKind, SnapTarget,
+    SnapTargetSet, TessellateCtx, TooltipField, TooltipGuide, Workspace,
 };
 
 use crate::indicators::{bollinger_bands, exponential_moving_average, moving_average};
@@ -275,6 +277,33 @@ impl ChartSpec for CandlestickSpec {
             z: 0,
             clip: None,
         });
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                CANDLE_MARK,
+                CANDLE_DATASET,
+                vec![
+                    TooltipField::new("Open", "open").as_number(2),
+                    TooltipField::new("High", "high").as_number(2),
+                    TooltipField::new("Low", "low").as_number(2),
+                    TooltipField::new("Close", "close").as_number(2),
+                    TooltipField::new("Direction", "direction").as_label(),
+                ],
+            )
+            .with_title_column("time"),
+        ));
+        scene.guides.push(Guide::Legend(
+            LegendGuide::new(legend_items(&self.overlays, self.options))
+                .with_title("OHLC")
+                .with_anchor(LegendAnchor::Bottom),
+        ));
+        if let Some(label) = latest_close_label(&layout, &self.candles) {
+            scene.guides.push(Guide::Labels(
+                LabelGuide::new(vec![label]).with_collision_padding(4.0),
+            ));
+        }
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, &self.candles)).with_name("candle closes"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -401,12 +430,14 @@ fn candle_dataset(layout: &CandlestickLayout, candles: &[Candle]) -> Dataset {
     let mut h = Vec::with_capacity(layout.bars.len());
     let mut l = Vec::with_capacity(layout.bars.len());
     let mut c = Vec::with_capacity(layout.bars.len());
+    let mut direction: Vec<Arc<str>> = Vec::with_capacity(layout.bars.len());
     for cd in candles {
         t.push(cd.time);
         o.push(cd.open);
         h.push(cd.high);
         l.push(cd.low);
         c.push(cd.close);
+        direction.push(Arc::from(if cd.is_up() { "up" } else { "down" }));
     }
     Dataset::new(
         CANDLE_DATASET,
@@ -417,8 +448,59 @@ fn candle_dataset(layout: &CandlestickLayout, candles: &[Candle]) -> Dataset {
             ("high".to_string(), Column::F32(ColumnData::new(h))),
             ("low".to_string(), Column::F32(ColumnData::new(l))),
             ("close".to_string(), Column::F32(ColumnData::new(c))),
+            (
+                "direction".to_string(),
+                Column::Utf8(ColumnData::new(direction)),
+            ),
         ],
     )
+}
+
+fn legend_items(overlays: &[Overlay], options: CandlestickOptions) -> Vec<LegendItem> {
+    let mut items = vec![
+        LegendItem::new("Up", options.up_color),
+        LegendItem::new("Down", options.down_color),
+    ];
+    for overlay in overlays {
+        match *overlay {
+            Overlay::Sma { window, color } => {
+                items.push(LegendItem::new(format!("SMA {window}"), color));
+            }
+            Overlay::Ema { window, color } => {
+                items.push(LegendItem::new(format!("EMA {window}"), color));
+            }
+            Overlay::Bollinger { window, color, .. } => {
+                items.push(LegendItem::new(format!("Bollinger {window}"), color));
+            }
+        }
+    }
+    items
+}
+
+fn latest_close_label(layout: &CandlestickLayout, candles: &[Candle]) -> Option<LabelItem> {
+    let bar = layout.bars.last()?;
+    let candle = candles.last()?;
+    Some(
+        LabelItem::new(bar.center_x, bar.y_close, "Close")
+            .with_detail(format!("{:.2}", candle.close))
+            .with_anchor(LabelAnchor::Right)
+            .with_kind(LabelKind::Data)
+            .with_priority(LabelPriority::Required),
+    )
+}
+
+fn snap_targets(layout: &CandlestickLayout, candles: &[Candle]) -> Vec<SnapTarget> {
+    layout
+        .bars
+        .iter()
+        .zip(candles)
+        .map(|(bar, candle)| {
+            SnapTarget::new(bar.center_x, bar.y_close, SnapKind::Point)
+                .with_radius(7.0)
+                .with_label(format!("Close {:.1}", candle.close))
+                .with_priority(if bar.up { 3 } else { 2 })
+        })
+        .collect()
 }
 
 fn overlay_dataset(layout: &CandlestickLayout) -> Dataset {
@@ -685,6 +767,7 @@ impl Mark for OverlayMark {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::{Guide, SnapKind};
 
     fn sample_candles(n: usize) -> Vec<Candle> {
         (0..n)
@@ -785,5 +868,63 @@ mod tests {
         assert!(c.is_up());
         let d = Candle::new(0, 10.0, 12.0, 9.0, 9.5);
         assert!(!d.is_up());
+    }
+
+    #[test]
+    fn build_chart_exposes_ohlc_tooltip_legend_labels_and_snap_targets() {
+        let chart = CandlestickSpec::new(sample_candles(12))
+            .with_overlay(Overlay::Sma {
+                window: 3,
+                color: [0.95, 0.72, 0.24, 1.0],
+            })
+            .build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(640, 360),
+            )
+            .expect("chart");
+
+        let tooltip = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Tooltip(tooltip) if tooltip.mark == CANDLE_MARK => Some(tooltip),
+                _ => None,
+            })
+            .expect("candle tooltip guide");
+        assert_eq!(tooltip.title_column.as_deref(), Some("time"));
+        assert_eq!(tooltip.fields.len(), 5);
+        assert!(tooltip.fields.iter().any(|field| field.column == "close"));
+
+        let legend = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Legend(legend) => Some(legend),
+                _ => None,
+            })
+            .expect("legend guide");
+        assert!(legend.items.iter().any(|item| item.label == "Up"));
+        assert!(legend.items.iter().any(|item| item.label == "Down"));
+        assert!(legend.items.iter().any(|item| item.label == "SMA 3"));
+
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(labels),
+                _ => None,
+            })
+            .expect("label guide");
+        assert!(labels.items.iter().any(|item| item.text == "Close"));
+
+        let targets = chart.snap_targets();
+        assert_eq!(targets.len(), 12);
+        assert!(targets.iter().all(|target| target.kind == SnapKind::Point));
+        assert!(targets
+            .iter()
+            .any(|target| target.label.as_deref() == Some("Close 111.0")));
     }
 }

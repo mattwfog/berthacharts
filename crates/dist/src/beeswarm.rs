@@ -6,8 +6,10 @@ use std::sync::Arc;
 
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinearScale, Mark, MarkId, PickCtx, PickHit, PointPrim,
-    Rect, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LinearScale, Mark, MarkId, PickCtx, PickHit, PointPrim, Rect,
+    Scale, ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet, TessellateCtx, TooltipField,
+    TooltipGuide, Workspace,
 };
 
 const GROUP_DATASET: DatasetId = DatasetId::new(0);
@@ -124,6 +126,8 @@ pub struct SwarmDot {
     pub color: [f32; 4],
     /// Index of source value within its group.
     pub source_row: usize,
+    /// Original sample value.
+    pub value: f32,
 }
 
 /// Computed beeswarm layout.
@@ -191,6 +195,27 @@ impl ChartSpec for BeeswarmSpec {
             z: 0,
             clip: None,
         });
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                SWARM_MARK,
+                GROUP_DATASET,
+                vec![
+                    TooltipField::new("Group", "group").as_label(),
+                    TooltipField::new("Value", "value").as_number(2),
+                    TooltipField::new("Sample", "sample").as_integer(),
+                ],
+            )
+            .with_title_column("group"),
+        ));
+        scene.guides.push(Guide::Labels(
+            LabelGuide::new(group_labels(&layout))
+                .with_collision_padding(3.0)
+                .with_max_visible(layout.groups.len()),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout, self.options.dot_radius))
+                .with_name("beeswarm samples"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -289,6 +314,7 @@ fn compute_layout(
                     y,
                     color: g.color,
                     source_row: row,
+                    value,
                 });
             }
             BeeswarmGroupLayout {
@@ -305,23 +331,66 @@ fn compute_layout(
 }
 
 fn group_dataset(layout: &BeeswarmLayout) -> Dataset {
-    let mut label: Vec<Arc<str>> = Vec::new();
-    let mut cx: Vec<f32> = Vec::new();
-    let mut count: Vec<i64> = Vec::new();
+    let mut group: Vec<Arc<str>> = Vec::new();
+    let mut sample: Vec<i64> = Vec::new();
+    let mut value: Vec<f32> = Vec::new();
+    let mut x: Vec<f32> = Vec::new();
+    let mut y: Vec<f32> = Vec::new();
     for g in &layout.groups {
-        label.push(Arc::from(g.label.as_str()));
-        cx.push(g.center_x);
-        count.push(g.dots.len() as i64);
+        for dot in &g.dots {
+            group.push(Arc::from(g.label.as_str()));
+            sample.push(dot.source_row as i64 + 1);
+            value.push(dot.value);
+            x.push(dot.x);
+            y.push(dot.y);
+        }
     }
     Dataset::new(
         GROUP_DATASET,
         1,
         vec![
-            ("label".to_string(), Column::Utf8(ColumnData::new(label))),
-            ("center_x".to_string(), Column::F32(ColumnData::new(cx))),
-            ("count".to_string(), Column::I64(ColumnData::new(count))),
+            ("group".to_string(), Column::Utf8(ColumnData::new(group))),
+            ("sample".to_string(), Column::I64(ColumnData::new(sample))),
+            ("value".to_string(), Column::F32(ColumnData::new(value))),
+            ("x".to_string(), Column::F32(ColumnData::new(x))),
+            ("y".to_string(), Column::F32(ColumnData::new(y))),
         ],
     )
+}
+
+fn group_labels(layout: &BeeswarmLayout) -> Vec<LabelItem> {
+    layout
+        .groups
+        .iter()
+        .filter_map(|group| {
+            let y = group
+                .dots
+                .iter()
+                .map(|dot| dot.y)
+                .fold(f32::NEG_INFINITY, f32::max);
+            y.is_finite().then(|| {
+                LabelItem::new(group.center_x, y + 12.0, group.label.clone())
+                    .with_anchor(LabelAnchor::Bottom)
+                    .with_kind(LabelKind::Column)
+                    .with_priority(LabelPriority::Important)
+            })
+        })
+        .collect()
+}
+
+fn snap_targets(layout: &BeeswarmLayout, radius: f32) -> Vec<SnapTarget> {
+    layout
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group.dots.iter().map(move |dot| {
+                SnapTarget::new(dot.x, dot.y, SnapKind::Point)
+                    .with_radius((radius + 4.0).clamp(5.0, 12.0))
+                    .with_label(format!("{} sample {}", group.label, dot.source_row + 1))
+                    .with_priority(2)
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -419,6 +488,7 @@ impl Mark for BeeswarmMark {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::{Column, Guide, SnapKind};
 
     #[test]
     fn empty_spec_rejected() {
@@ -465,5 +535,44 @@ mod tests {
             )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn build_chart_exposes_dot_tooltips_and_snap_targets() {
+        let workspace = berthacharts_core::Workspace::new();
+        let chart = BeeswarmSpec::new(vec![
+            BeeswarmGroup::new("A", vec![1.0, 2.0]),
+            BeeswarmGroup::new("B", vec![3.0]),
+        ])
+        .build_chart(workspace.clone(), ChartSize::new(360, 240))
+        .expect("chart");
+
+        let tooltip = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Tooltip(tooltip) if tooltip.mark == SWARM_MARK => Some(tooltip),
+                _ => None,
+            })
+            .expect("dot tooltip guide");
+        assert_eq!(tooltip.title_column.as_deref(), Some("group"));
+        assert_eq!(tooltip.fields.len(), 3);
+        assert_eq!(tooltip.fields[1].column, "value");
+
+        let dataset = workspace.dataset(GROUP_DATASET).expect("swarm dataset");
+        assert_eq!(dataset.len(), 3);
+        let group = match dataset.column("group").expect("group").as_ref() {
+            Column::Utf8(values) => values,
+            other => panic!("expected utf8 group column, got {}", other.dtype()),
+        };
+        assert_eq!(group.values[2].as_ref(), "B");
+
+        let targets = chart.snap_targets();
+        assert_eq!(targets.len(), 3);
+        assert!(targets.iter().all(|target| target.kind == SnapKind::Point));
+        assert!(targets
+            .iter()
+            .any(|target| target.label.as_deref() == Some("B sample 1")));
     }
 }

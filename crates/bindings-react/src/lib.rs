@@ -7,6 +7,8 @@
 //!   const chart = await BerthaChart.create(canvas, 640, 360);
 //!   chart.bar(jsonString);      // BarSpec JSON
 //!   chart.line(jsonString);     // LineSpec JSON
+//!   chart.area(jsonString);     // AreaChartSpec JSON
+//!   chart.sparkline(jsonString); // SparklineSpec JSON
 //!   chart.scatter(jsonString);  // ScatterSpec JSON
 //!   chart.heatmap(jsonString);  // HeatmapSpec JSON
 //!   chart.guides();             // → JSON of axes, labels, legend
@@ -19,8 +21,10 @@
 use std::sync::Arc;
 
 use berthacharts_charts::{
-    BarChartOptions, BarChartSpec, BarDatum, HeatmapCell, HeatmapOptions, HeatmapSpec,
-    LineChartOptions, LineChartSpec, LineDatum, ScatterDatum, ScatterPlotOptions, ScatterPlotSpec,
+    AreaChartOptions, AreaChartSpec, AreaDatum, BarChartOptions, BarChartSpec, BarDatum, DotMode,
+    HeatmapCell, HeatmapOptions, HeatmapSpec, LineChartOptions, LineChartSpec, LineDatum,
+    ScatterDatum, ScatterPlotOptions, ScatterPlotSpec, SparklineDatum, SparklineOptions,
+    SparklineSpec, StackMode,
 };
 use berthacharts_core::Workspace;
 #[cfg(target_arch = "wasm32")]
@@ -118,6 +122,32 @@ impl BerthaChart {
     #[wasm_bindgen]
     pub fn line(&mut self, json: &str) -> Result<(), JsValue> {
         let input: LineInput =
+            serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let spec = input.into_spec();
+        let size = ChartSize::new(self.logical_w, self.logical_h);
+        let chart = spec
+            .build_chart(self.workspace.clone(), size)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.render_chart(&chart)
+    }
+
+    /// Render an area chart from JSON.
+    #[wasm_bindgen]
+    pub fn area(&mut self, json: &str) -> Result<(), JsValue> {
+        let input: AreaInput =
+            serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let spec = input.into_spec();
+        let size = ChartSize::new(self.logical_w, self.logical_h);
+        let chart = spec
+            .build_chart(self.workspace.clone(), size)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.render_chart(&chart)
+    }
+
+    /// Render a sparkline from JSON.
+    #[wasm_bindgen]
+    pub fn sparkline(&mut self, json: &str) -> Result<(), JsValue> {
+        let input: SparklineInput =
             serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let spec = input.into_spec();
         let size = ChartSize::new(self.logical_w, self.logical_h);
@@ -282,6 +312,10 @@ fn extract_guides(chart: &berthacharts_core::Chart) -> String {
                         berthacharts_core::LabelAnchor::Bottom => "bottom",
                         berthacharts_core::LabelAnchor::Left => "left",
                         berthacharts_core::LabelAnchor::Right => "right",
+                        berthacharts_core::LabelAnchor::TopLeft => "top-left",
+                        berthacharts_core::LabelAnchor::TopRight => "top-right",
+                        berthacharts_core::LabelAnchor::BottomLeft => "bottom-left",
+                        berthacharts_core::LabelAnchor::BottomRight => "bottom-right",
                         _ => "center",
                     };
                     labels.push(LabelOutput {
@@ -298,6 +332,9 @@ fn extract_guides(chart: &berthacharts_core::Chart) -> String {
                     berthacharts_core::LegendAnchor::Top => "top",
                     berthacharts_core::LegendAnchor::Bottom => "bottom",
                     berthacharts_core::LegendAnchor::TopLeft => "top-left",
+                    berthacharts_core::LegendAnchor::TopRight => "top-right",
+                    berthacharts_core::LegendAnchor::BottomLeft => "bottom-left",
+                    berthacharts_core::LegendAnchor::BottomRight => "bottom-right",
                     _ => "bottom",
                 };
                 legend = Some(LegendOutput {
@@ -340,6 +377,40 @@ fn rgba_to_css(c: [f32; 4]) -> String {
         format!("rgb({r},{g},{b})")
     } else {
         format!("rgba({r},{g},{b},{:.2})", a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use berthacharts_core::{
+        Chart, Guide, LabelAnchor, LabelGuide, LabelItem, LegendAnchor, LegendGuide, LegendItem,
+        Scene, Viewport, Workspace,
+    };
+
+    #[test]
+    fn guide_extraction_preserves_full_label_and_legend_anchors() {
+        let workspace = Workspace::new();
+        let viewport = Viewport::full(320, 180, 1.0);
+        let mut scene = Scene::new(viewport);
+        scene
+            .guides
+            .push(Guide::Labels(LabelGuide::new(vec![LabelItem::new(
+                120.0, 40.0, "Peak",
+            )
+            .with_anchor(LabelAnchor::TopRight)])));
+        scene.guides.push(Guide::Legend(
+            LegendGuide::new(vec![LegendItem::new("Series", [0.2, 0.4, 0.8, 1.0])])
+                .with_anchor(LegendAnchor::BottomRight),
+        ));
+        let mut chart = Chart::new(workspace, viewport);
+        chart.set_scene(scene);
+
+        let output: serde_json::Value =
+            serde_json::from_str(&extract_guides(&chart)).expect("guide json");
+
+        assert_eq!(output["labels"][0]["anchor"], "top-right");
+        assert_eq!(output["legend"]["anchor"], "bottom-right");
     }
 }
 
@@ -432,6 +503,150 @@ impl LineInput {
         opts.line_width = self.line_width;
         opts.show_points = self.show_points;
         LineChartSpec::new(data).with_options(opts)
+    }
+}
+
+#[derive(Deserialize)]
+struct AreaDatumInput {
+    series: String,
+    x: f32,
+    y: f32,
+}
+
+#[derive(Deserialize)]
+struct AreaInput {
+    data: Vec<AreaDatumInput>,
+    #[serde(default)]
+    padding: Option<f32>,
+    #[serde(default)]
+    stack: Option<String>,
+    #[serde(default)]
+    overlap_fill_opacity: Option<f32>,
+    #[serde(default)]
+    show_line: Option<bool>,
+    #[serde(default)]
+    line_width: Option<f32>,
+    #[serde(default)]
+    y_domain: Option<(f32, f32)>,
+}
+
+impl AreaInput {
+    fn into_spec(self) -> AreaChartSpec {
+        let data = self
+            .data
+            .into_iter()
+            .map(|d| AreaDatum::new(d.series, d.x, d.y))
+            .collect();
+        let mut options = AreaChartOptions::default();
+        if let Some(padding) = self.padding {
+            options.padding = padding;
+        }
+        if let Some(stack) = self.stack {
+            options.stack = parse_stack_mode(&stack);
+        }
+        if let Some(opacity) = self.overlap_fill_opacity {
+            options.overlap_fill_opacity = opacity;
+        }
+        if let Some(show_line) = self.show_line {
+            options.show_line = show_line;
+        }
+        if let Some(line_width) = self.line_width {
+            options.line_width = line_width;
+        }
+        if let Some(y_domain) = self.y_domain {
+            options.y_domain = Some(y_domain);
+        }
+        AreaChartSpec::new(data).with_options(options)
+    }
+}
+
+fn parse_stack_mode(value: &str) -> StackMode {
+    match value {
+        "stacked" | "stack" => StackMode::Stacked,
+        "normalized" | "normalize" | "percent" | "percentage" => StackMode::Normalized,
+        _ => StackMode::Overlap,
+    }
+}
+
+#[derive(Deserialize)]
+struct SparklineDatumInput {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Deserialize)]
+struct SparklineInput {
+    data: Vec<SparklineDatumInput>,
+    #[serde(default)]
+    padding: Option<f32>,
+    #[serde(default)]
+    stroke: Option<[f32; 4]>,
+    #[serde(default)]
+    line_width: Option<f32>,
+    #[serde(default)]
+    fill: Option<[f32; 4]>,
+    #[serde(default)]
+    dots: Option<String>,
+    #[serde(default)]
+    dot_color: Option<[f32; 4]>,
+    #[serde(default)]
+    dot_radius: Option<f32>,
+    #[serde(default)]
+    baseline: Option<bool>,
+    #[serde(default)]
+    baseline_color: Option<[f32; 4]>,
+    #[serde(default)]
+    y_domain: Option<(f32, f32)>,
+}
+
+impl SparklineInput {
+    fn into_spec(self) -> SparklineSpec {
+        let data = self
+            .data
+            .into_iter()
+            .map(|d| SparklineDatum::new(d.x, d.y))
+            .collect();
+        let mut options = SparklineOptions::default();
+        if let Some(padding) = self.padding {
+            options.padding = padding;
+        }
+        if let Some(stroke) = self.stroke {
+            options.stroke = stroke;
+        }
+        if let Some(line_width) = self.line_width {
+            options.line_width = line_width;
+        }
+        if let Some(fill) = self.fill {
+            options.fill = Some(fill);
+        }
+        if let Some(dots) = self.dots {
+            options.dots = parse_dot_mode(&dots);
+        }
+        if let Some(dot_color) = self.dot_color {
+            options.dot_color = dot_color;
+        }
+        if let Some(dot_radius) = self.dot_radius {
+            options.dot_radius = dot_radius;
+        }
+        if let Some(baseline) = self.baseline {
+            options.baseline = baseline;
+        }
+        if let Some(baseline_color) = self.baseline_color {
+            options.baseline_color = baseline_color;
+        }
+        if let Some(y_domain) = self.y_domain {
+            options.y_domain = Some(y_domain);
+        }
+        SparklineSpec::new(data).with_options(options)
+    }
+}
+
+fn parse_dot_mode(value: &str) -> DotMode {
+    match value {
+        "min_max" | "minMax" | "extrema" => DotMode::MinMax,
+        "first_last" | "firstLast" | "endpoints" => DotMode::FirstLast,
+        "all" => DotMode::All,
+        _ => DotMode::None,
     }
 }
 

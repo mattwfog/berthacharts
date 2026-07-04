@@ -167,6 +167,14 @@ export function LineChart(props) {
   return React.createElement(BerthaChartCanvas, { ...props, type: "line" });
 }
 
+export function AreaChart(props) {
+  return React.createElement(BerthaChartCanvas, { ...props, type: "area" });
+}
+
+export function Sparkline(props) {
+  return React.createElement(BerthaChartCanvas, { ...props, type: "sparkline" });
+}
+
 export function ScatterPlot(props) {
   return React.createElement(BerthaChartCanvas, { ...props, type: "scatter" });
 }
@@ -217,10 +225,16 @@ function normalizeOptions(type, options) {
     yTicks: "y_ticks",
     yMax: "y_max",
     lineWidth: "line_width",
+    overlapFillOpacity: "overlap_fill_opacity",
+    showLine: "show_line",
     showPoints: "show_points",
     signalThreshold: "signal_threshold",
     legendTitle: "legend_title",
     maxVisibleLabels: "max_visible_labels",
+    dotColor: "dot_color",
+    dotRadius: "dot_radius",
+    baselineColor: "baseline_color",
+    yDomain: "y_domain",
   };
   const normalized = { ...options };
   for (const [from, to] of Object.entries(aliases)) {
@@ -326,8 +340,10 @@ function renderAxis(axis, index, plot) {
 }
 
 function renderLegend(legend, plot) {
-  const x = plot.x + plot.w - 120;
-  const y = plot.y + 8;
+  const itemCount = (legend.items || []).length;
+  const width = 132;
+  const height = 20 + itemCount * 18;
+  const { x, y } = legendPosition(legend.anchor, plot, width, height);
   return React.createElement(
     "g",
     { key: "legend", transform: `translate(${x} ${y})` },
@@ -362,15 +378,42 @@ function renderLegend(legend, plot) {
   );
 }
 
+function legendPosition(anchor, plot, width, height) {
+  const margin = 8;
+  switch (anchor) {
+    case "top-left":
+      return { x: plot.x + margin, y: plot.y + margin };
+    case "top-right":
+      return { x: plot.x + plot.w - width - margin, y: plot.y + margin };
+    case "bottom-left":
+      return { x: plot.x + margin, y: plot.y + plot.h - height - margin };
+    case "bottom-right":
+      return {
+        x: plot.x + plot.w - width - margin,
+        y: plot.y + plot.h - height - margin,
+      };
+    case "top":
+      return { x: plot.x + margin, y: plot.y + margin };
+    case "bottom":
+      return { x: plot.x + margin, y: plot.y + plot.h - height - margin };
+    default:
+      return { x: plot.x + plot.w - width - margin, y: plot.y + margin };
+  }
+}
+
 function textAnchor(anchor) {
-  if (anchor === "left") return "start";
-  if (anchor === "right") return "end";
+  if (anchor?.includes("left")) return "end";
+  if (anchor?.includes("right")) return "start";
+  if (anchor === "left") return "end";
+  if (anchor === "right") return "start";
   return "middle";
 }
 
 function dominantBaseline(anchor) {
-  if (anchor === "top") return "hanging";
-  if (anchor === "bottom") return "baseline";
+  if (anchor?.includes("top")) return "baseline";
+  if (anchor?.includes("bottom")) return "hanging";
+  if (anchor === "top") return "baseline";
+  if (anchor === "bottom") return "hanging";
   return "middle";
 }
 

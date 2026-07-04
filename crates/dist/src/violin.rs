@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinearScale, Mark, MarkId, PathCommand, PathPrim, PickCtx,
-    PickHit, Rect, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LinearScale, Mark, MarkId, PathCommand, PathPrim, PickCtx,
+    PickHit, Rect, Scale, ScaleId, Scene, SnapKind, SnapTarget, SnapTargetSet, TessellateCtx,
+    TooltipField, TooltipGuide, Workspace,
 };
 
 const GROUP_DATASET: DatasetId = DatasetId::new(0);
@@ -129,6 +131,12 @@ pub struct ViolinShape {
     pub center_x: f32,
     /// Polygon vertices in screen pixels (outline of the violin).
     pub polygon: Vec<[f32; 2]>,
+    /// Number of source samples.
+    pub count: usize,
+    /// Minimum source sample value.
+    pub min: f32,
+    /// Maximum source sample value.
+    pub max: f32,
 }
 
 /// Computed violin layout.
@@ -181,6 +189,26 @@ impl ChartSpec for ViolinSpec {
             z: 0,
             clip: None,
         });
+        scene.guides.push(Guide::Tooltip(
+            TooltipGuide::new(
+                VIOLIN_MARK,
+                GROUP_DATASET,
+                vec![
+                    TooltipField::new("N", "count").as_integer(),
+                    TooltipField::new("Min", "min").as_number(2),
+                    TooltipField::new("Max", "max").as_number(2),
+                ],
+            )
+            .with_title_column("label"),
+        ));
+        scene.guides.push(Guide::Labels(
+            LabelGuide::new(group_labels(&layout))
+                .with_collision_padding(3.0)
+                .with_max_visible(layout.shapes.len()),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout)).with_name("violin groups"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
@@ -283,6 +311,9 @@ fn compute_layout(groups: &[ViolinGroup], options: &ViolinOptions, plot: Rect) -
                 color: g.color,
                 center_x,
                 polygon,
+                count: g.values.len(),
+                min: g_min,
+                max: g_max,
             }
         })
         .collect();
@@ -293,9 +324,15 @@ fn compute_layout(groups: &[ViolinGroup], options: &ViolinOptions, plot: Rect) -
 fn group_dataset(layout: &ViolinLayout) -> Dataset {
     let mut label: Vec<Arc<str>> = Vec::new();
     let mut cx: Vec<f32> = Vec::new();
+    let mut count: Vec<i64> = Vec::new();
+    let mut min: Vec<f32> = Vec::new();
+    let mut max: Vec<f32> = Vec::new();
     for s in &layout.shapes {
         label.push(Arc::from(s.label.as_str()));
         cx.push(s.center_x);
+        count.push(s.count as i64);
+        min.push(s.min);
+        max.push(s.max);
     }
     Dataset::new(
         GROUP_DATASET,
@@ -303,7 +340,53 @@ fn group_dataset(layout: &ViolinLayout) -> Dataset {
         vec![
             ("label".to_string(), Column::Utf8(ColumnData::new(label))),
             ("center_x".to_string(), Column::F32(ColumnData::new(cx))),
+            ("count".to_string(), Column::I64(ColumnData::new(count))),
+            ("min".to_string(), Column::F32(ColumnData::new(min))),
+            ("max".to_string(), Column::F32(ColumnData::new(max))),
         ],
+    )
+}
+
+fn group_labels(layout: &ViolinLayout) -> Vec<LabelItem> {
+    layout
+        .shapes
+        .iter()
+        .map(|shape| {
+            let y = violin_bottom_y(shape) + 12.0;
+            LabelItem::new(shape.center_x, y, shape.label.clone())
+                .with_anchor(LabelAnchor::Bottom)
+                .with_kind(LabelKind::Column)
+                .with_priority(LabelPriority::Important)
+        })
+        .collect()
+}
+
+fn snap_targets(layout: &ViolinLayout) -> Vec<SnapTarget> {
+    layout
+        .shapes
+        .iter()
+        .map(|shape| {
+            SnapTarget::new(shape.center_x, violin_mid_y(shape), SnapKind::Center)
+                .with_radius(8.0)
+                .with_label(format!("{} distribution", shape.label))
+                .with_priority(2)
+        })
+        .collect()
+}
+
+fn violin_mid_y(shape: &ViolinShape) -> f32 {
+    let (top, bottom) = violin_y_extent(shape);
+    (top + bottom) * 0.5
+}
+
+fn violin_bottom_y(shape: &ViolinShape) -> f32 {
+    violin_y_extent(shape).1
+}
+
+fn violin_y_extent(shape: &ViolinShape) -> (f32, f32) {
+    shape.polygon.iter().fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(top, bottom), point| (top.min(point[1]), bottom.max(point[1])),
     )
 }
 
@@ -426,6 +509,7 @@ fn point_in_polygon(poly: &[[f32; 2]], p: [f32; 2]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::{Column, Guide, SnapKind};
 
     #[test]
     fn empty_spec_rejected() {
@@ -483,5 +567,52 @@ mod tests {
             )
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn build_chart_exposes_group_tooltips_labels_and_snap_targets() {
+        let workspace = berthacharts_core::Workspace::new();
+        let chart = ViolinSpec::new(vec![
+            ViolinGroup::new("A", vec![1.0, 2.0, 3.0]),
+            ViolinGroup::new("B", vec![2.0, 4.0, 6.0]),
+        ])
+        .build_chart(workspace.clone(), ChartSize::new(420, 300))
+        .expect("chart");
+
+        let tooltip = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Tooltip(tooltip) if tooltip.mark == VIOLIN_MARK => Some(tooltip),
+                _ => None,
+            })
+            .expect("violin tooltip guide");
+        assert_eq!(tooltip.title_column.as_deref(), Some("label"));
+        assert!(tooltip.fields.iter().any(|field| field.column == "count"));
+        assert!(tooltip.fields.iter().any(|field| field.column == "min"));
+        assert!(tooltip.fields.iter().any(|field| field.column == "max"));
+
+        let dataset = workspace.dataset(GROUP_DATASET).expect("group dataset");
+        let count = match dataset.column("count").expect("count").as_ref() {
+            Column::I64(values) => values,
+            other => panic!("expected i64 count column, got {}", other.dtype()),
+        };
+        assert_eq!(count.values, vec![3, 3]);
+
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(labels),
+                _ => None,
+            })
+            .expect("label guide");
+        assert_eq!(labels.items.len(), 2);
+
+        let targets = chart.snap_targets();
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().all(|target| target.kind == SnapKind::Center));
     }
 }

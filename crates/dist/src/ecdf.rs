@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 use berthacharts_core::{
     BlendMode, CartesianCoord, Chart, ChartSize, ChartSpec, Column, ColumnData, CoordId, Dataset,
-    DatasetId, Geometry, Layer, LayerId, LinePrim, LinearScale, Mark, MarkId, PickCtx, PickHit,
-    Rect, Scale, ScaleId, Scene, TessellateCtx, Workspace,
+    DatasetId, Geometry, Guide, Interaction, LabelAnchor, LabelGuide, LabelItem, LabelKind,
+    LabelPriority, Layer, LayerId, LegendAnchor, LegendGuide, LegendItem, LinePrim, LinearScale,
+    Mark, MarkId, PickCtx, PickHit, Rect, Scale, ScaleId, Scene, SnapKind, SnapTarget,
+    SnapTargetSet, TessellateCtx, Workspace,
 };
 
 const SERIES_DATASET: DatasetId = DatasetId::new(0);
@@ -179,11 +181,70 @@ impl ChartSpec for EcdfSpec {
             z: 0,
             clip: None,
         });
+        scene.guides.push(Guide::Legend(
+            LegendGuide::new(legend_items(&layout))
+                .with_title("Series")
+                .with_anchor(LegendAnchor::Bottom),
+        ));
+        scene.guides.push(Guide::Labels(
+            LabelGuide::new(endpoint_labels(&layout))
+                .with_collision_padding(4.0)
+                .with_max_visible(layout.series.len()),
+        ));
+        scene.interactions.push(Interaction::SnapTargets(
+            SnapTargetSet::new(snap_targets(&layout)).with_name("ecdf endpoints"),
+        ));
 
         let mut chart = Chart::new(workspace, viewport);
         chart.set_scene(scene);
         Ok(chart)
     }
+}
+
+fn legend_items(layout: &EcdfLayout) -> Vec<LegendItem> {
+    layout
+        .series
+        .iter()
+        .map(|series| LegendItem::new(series.label.clone(), series.color))
+        .collect()
+}
+
+fn endpoint_labels(layout: &EcdfLayout) -> Vec<LabelItem> {
+    layout
+        .series
+        .iter()
+        .filter_map(|series| {
+            series.points.last().map(|point| {
+                LabelItem::new(point[0], point[1], series.label.clone())
+                    .with_anchor(LabelAnchor::Right)
+                    .with_kind(LabelKind::Data)
+                    .with_priority(LabelPriority::Important)
+            })
+        })
+        .collect()
+}
+
+fn snap_targets(layout: &EcdfLayout) -> Vec<SnapTarget> {
+    let mut targets = Vec::with_capacity(layout.series.len() * 2);
+    for series in &layout.series {
+        if let Some(point) = series.points.first() {
+            targets.push(
+                SnapTarget::new(point[0], point[1], SnapKind::Point)
+                    .with_radius(6.0)
+                    .with_label(format!("{} start", series.label))
+                    .with_priority(2),
+            );
+        }
+        if let Some(point) = series.points.last() {
+            targets.push(
+                SnapTarget::new(point[0], point[1], SnapKind::Point)
+                    .with_radius(6.0)
+                    .with_label(format!("{} end", series.label))
+                    .with_priority(3),
+            );
+        }
+    }
+    targets
 }
 
 fn compute_layout(series: &[EcdfSeries], options: &EcdfOptions, plot: Rect) -> EcdfLayout {
@@ -353,6 +414,7 @@ impl Mark for EcdfLineMark {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berthacharts_core::{Guide, SnapKind};
 
     #[test]
     fn empty_spec_rejected() {
@@ -408,5 +470,52 @@ mod tests {
         )
         .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn build_chart_exposes_series_legend_labels_and_snap_targets() {
+        let chart = EcdfSpec::new(vec![
+            EcdfSeries::new("A", vec![1.0, 2.0, 3.0]),
+            EcdfSeries::new("B", vec![2.0, 4.0, 6.0]),
+        ])
+        .build_chart(
+            berthacharts_core::Workspace::new(),
+            ChartSize::new(420, 300),
+        )
+        .expect("chart");
+
+        let legend = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Legend(legend) => Some(legend),
+                _ => None,
+            })
+            .expect("legend guide");
+        assert_eq!(legend.items.len(), 2);
+        assert_eq!(legend.items[0].label, "A");
+
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(labels),
+                _ => None,
+            })
+            .expect("label guide");
+        assert!(labels.items.iter().any(|item| item.text == "A"));
+        assert!(labels.items.iter().any(|item| item.text == "B"));
+
+        let targets = chart.snap_targets();
+        assert_eq!(targets.len(), 4);
+        assert!(targets.iter().all(|target| target.kind == SnapKind::Point));
+        assert!(targets
+            .iter()
+            .any(|target| target.label.as_deref() == Some("A start")));
+        assert!(targets
+            .iter()
+            .any(|target| target.label.as_deref() == Some("B end")));
     }
 }
