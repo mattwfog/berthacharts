@@ -194,10 +194,18 @@ impl ScatterPlotSpec {
     fn plot_area(&self, size: ChartSize) -> Rect {
         let width = size.width as f32;
         let height = size.height as f32;
-        let left = self.options.padding_left.clamp(0.0, width - 1.0);
-        let top = self.options.padding_top.clamp(0.0, height - 1.0);
-        let right = self.options.padding_right.clamp(0.0, width - left - 1.0);
-        let bottom = self.options.padding_bottom.clamp(0.0, height - top - 1.0);
+        // Upper bounds floored at 0 — see bar.rs plot_area: inverted clamp
+        // bounds panic, and a panic poisons the wasm handle.
+        let left = self.options.padding_left.clamp(0.0, (width - 1.0).max(0.0));
+        let top = self.options.padding_top.clamp(0.0, (height - 1.0).max(0.0));
+        let right = self
+            .options
+            .padding_right
+            .clamp(0.0, (width - left - 1.0).max(0.0));
+        let bottom = self
+            .options
+            .padding_bottom
+            .clamp(0.0, (height - top - 1.0).max(0.0));
         Rect::new(
             left,
             top,

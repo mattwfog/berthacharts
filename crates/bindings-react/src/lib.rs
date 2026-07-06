@@ -193,6 +193,11 @@ impl BerthaChart {
     /// Resize the renderer.
     #[wasm_bindgen]
     pub fn resize(&mut self, width: u32, height: u32) {
+        // Floor logical dims at 1: a collapsing container reports 0x0 during
+        // page teardown, and physical() already floors at 1 — the logical
+        // size must never be more degenerate than the surface it maps to.
+        let width = width.max(1);
+        let height = height.max(1);
         let dpr = dpr();
         self.logical_w = width;
         self.logical_h = height;
