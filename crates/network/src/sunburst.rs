@@ -172,6 +172,84 @@ impl Default for SunburstOptions {
     }
 }
 
+impl SunburstOptions {
+    /// Set the outer padding in CSS pixels.
+    #[must_use]
+    pub const fn with_padding(mut self, padding: f32) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// Set the radius of the central root disk.
+    #[must_use]
+    pub const fn with_inner_radius(mut self, inner_radius: f32) -> Self {
+        self.inner_radius = inner_radius;
+        self
+    }
+
+    /// Set the gap between rings in CSS pixels.
+    #[must_use]
+    pub const fn with_ring_gap(mut self, ring_gap: f32) -> Self {
+        self.ring_gap = ring_gap;
+        self
+    }
+
+    /// Set the angular gap between sibling sectors in radians.
+    #[must_use]
+    pub const fn with_angular_gap(mut self, angular_gap: f32) -> Self {
+        self.angular_gap = angular_gap;
+        self
+    }
+
+    /// Set the start angle in radians.
+    #[must_use]
+    pub const fn with_start_angle(mut self, start_angle: f32) -> Self {
+        self.start_angle = start_angle;
+        self
+    }
+
+    /// Set the total angular span in radians.
+    #[must_use]
+    pub const fn with_sweep_angle(mut self, sweep_angle: f32) -> Self {
+        self.sweep_angle = sweep_angle;
+        self
+    }
+
+    /// Set direct-label visibility thresholds.
+    #[must_use]
+    pub const fn with_label_thresholds(
+        mut self,
+        min_label_sweep: f32,
+        min_label_area: f32,
+    ) -> Self {
+        self.min_label_sweep = min_label_sweep;
+        self.min_label_area = min_label_area;
+        self
+    }
+
+    /// Set the maximum number of visible overlay labels.
+    #[must_use]
+    pub const fn with_max_visible_labels(mut self, max_visible_labels: usize) -> Self {
+        self.max_visible_labels = max_visible_labels;
+        self
+    }
+
+    /// Set separator stroke styling.
+    #[must_use]
+    pub const fn with_separator(mut self, color: [f32; 4], width: f32) -> Self {
+        self.separator_color = color;
+        self.separator_width = width;
+        self
+    }
+
+    /// Control whether unordered siblings sort by descending computed value.
+    #[must_use]
+    pub const fn with_sort_siblings_by_value(mut self, sort_siblings_by_value: bool) -> Self {
+        self.sort_siblings_by_value = sort_siblings_by_value;
+        self
+    }
+}
+
 /// Reusable sunburst chart specification.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SunburstSpec {
@@ -262,6 +340,7 @@ impl SunburstSpec {
     /// Compute reusable layout without building a chart.
     pub fn layout(&self, size: ChartSize) -> Result<SunburstLayout, SunburstError> {
         validate_nodes(&self.nodes)?;
+        validate_options(&self.options)?;
 
         let root = root_index(&self.nodes)?;
         let mut children = child_index(&self.nodes)?;
@@ -393,7 +472,11 @@ impl SunburstSpec {
 
     fn labels(&self, layout: &SunburstLayout) -> Vec<LabelItem> {
         let mut labels = Vec::new();
-        for sector in &layout.sectors {
+        for sector in layout
+            .sectors
+            .iter()
+            .filter(|sector| sector.has_visible_area())
+        {
             if sector.depth == 0 {
                 labels.push(
                     LabelItem::new(layout.center.0, layout.center.1, &sector.label)
@@ -448,6 +531,7 @@ impl SunburstSpec {
         layout
             .sectors
             .iter()
+            .filter(|sector| sector.has_visible_area())
             .map(|sector| {
                 let (x, y) = if sector.depth == 0 {
                     layout.center
@@ -718,6 +802,14 @@ impl SunburstSector {
     fn area_proxy(&self) -> f32 {
         self.sweep().abs() * self.radial_thickness().max(0.0) * self.outer_radius.max(1.0)
     }
+
+    fn has_visible_area(&self) -> bool {
+        self.value > 0.0
+            && self.sweep().abs() >= MIN_SWEEP
+            && self.radial_thickness() > 0.0
+            && self.start_angle.is_finite()
+            && self.end_angle.is_finite()
+    }
 }
 
 /// Error building a sunburst chart.
@@ -750,6 +842,13 @@ pub enum SunburstError {
         /// Bad value.
         value: f32,
     },
+    /// A layout option is non-finite or outside the supported range.
+    InvalidOption {
+        /// Option field name.
+        name: String,
+        /// Bad value.
+        value: f32,
+    },
     /// The hierarchy contains a cycle or disconnected node.
     InvalidHierarchy,
     /// The computed root total was not positive.
@@ -768,6 +867,9 @@ impl fmt::Display for SunburstError {
             Self::MissingParent { id } => write!(f, "missing sunburst parent `{id}`"),
             Self::InvalidValue { id, value } => {
                 write!(f, "sunburst node `{id}` has invalid value {value}")
+            }
+            Self::InvalidOption { name, value } => {
+                write!(f, "sunburst option `{name}` has invalid value {value}")
             }
             Self::InvalidHierarchy => write!(f, "sunburst hierarchy is cyclic or disconnected"),
             Self::NonPositiveTotal => write!(f, "sunburst total must be positive"),
@@ -925,6 +1027,12 @@ fn layout_node(
     );
     paths[index] = path.clone();
 
+    let end_angle = if input.totals[index] > 0.0 && display_sweep > 0.0 {
+        display_start + display_sweep.max(MIN_SWEEP)
+    } else {
+        display_start
+    };
+
     sectors.push(SunburstSector {
         source_index: index,
         id: node.id.clone(),
@@ -955,14 +1063,18 @@ fn layout_node(
         inner_radius,
         outer_radius,
         start_angle: display_start,
-        end_angle: display_start + display_sweep.max(MIN_SWEEP),
+        end_angle,
         color: node.color,
     });
 
     let mut cursor = start_angle;
     let child_count = input.children[index].len();
     for (child_index, child) in input.children[index].iter().enumerate() {
-        let child_sweep = sweep * input.totals[*child] / input.totals[index].max(1.0);
+        let child_sweep = if input.totals[index] > 0.0 {
+            sweep * input.totals[*child] / input.totals[index]
+        } else {
+            0.0
+        };
         layout_node(
             LayoutFrame {
                 index: *child,
@@ -1102,6 +1214,9 @@ fn polar(sector: &SunburstSector, radius: f32, angle: f32) -> [f32; 2] {
 }
 
 fn sector_contains(sector: &SunburstSector, point: (f32, f32)) -> bool {
+    if !sector.has_visible_area() || !point.0.is_finite() || !point.1.is_finite() {
+        return false;
+    }
     let dx = point.0 - sector.cx;
     let dy = point.1 - sector.cy;
     let radius = dx.hypot(dy);
@@ -1117,6 +1232,49 @@ fn sector_contains(sector: &SunburstSector, point: (f32, f32)) -> bool {
         angle -= TAU;
     }
     angle <= sector.end_angle + 0.002
+}
+
+fn validate_options(options: &SunburstOptions) -> Result<(), SunburstError> {
+    validate_nonnegative_option("padding", options.padding)?;
+    validate_nonnegative_option("inner_radius", options.inner_radius)?;
+    validate_nonnegative_option("ring_gap", options.ring_gap)?;
+    validate_nonnegative_option("angular_gap", options.angular_gap)?;
+    validate_nonnegative_option("separator_width", options.separator_width)?;
+    validate_nonnegative_option("min_label_sweep", options.min_label_sweep)?;
+    validate_nonnegative_option("min_label_area", options.min_label_area)?;
+    validate_finite_option("start_angle", options.start_angle)?;
+    if !options.sweep_angle.is_finite() || options.sweep_angle <= 0.0 || options.sweep_angle > TAU {
+        return Err(SunburstError::InvalidOption {
+            name: "sweep_angle".into(),
+            value: options.sweep_angle,
+        });
+    }
+    for (index, value) in options.separator_color.iter().copied().enumerate() {
+        validate_finite_option(format!("separator_color[{index}]"), value)?;
+    }
+    Ok(())
+}
+
+fn validate_nonnegative_option(name: impl Into<String>, value: f32) -> Result<(), SunburstError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(SunburstError::InvalidOption {
+            name: name.into(),
+            value,
+        })
+    }
+}
+
+fn validate_finite_option(name: impl Into<String>, value: f32) -> Result<(), SunburstError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(SunburstError::InvalidOption {
+            name: name.into(),
+            value,
+        })
+    }
 }
 
 fn validate_nodes(nodes: &[SunburstNode]) -> Result<(), SunburstError> {
@@ -1513,6 +1671,15 @@ fn rgba(r: f32, g: f32, b: f32, a: f32) -> [f32; 4] {
 mod tests {
     use super::*;
 
+    const EPS: f32 = 0.001;
+
+    fn assert_near(left: f32, right: f32) {
+        assert!(
+            (left - right).abs() <= EPS,
+            "expected {left:.3} to be within {EPS:.3} of {right:.3}"
+        );
+    }
+
     fn demo_spec() -> SunburstSpec {
         SunburstSpec::new(vec![
             SunburstNode::new(
@@ -1669,6 +1836,156 @@ mod tests {
             .collect();
 
         assert_eq!(root_children, vec!["new", "expansion"]);
+    }
+
+    #[test]
+    fn sunburst_layout_allocates_fractional_values_against_parent_total() {
+        let spec = SunburstSpec::new(vec![
+            SunburstNode::new(
+                "root",
+                "Root",
+                None::<String>,
+                0.0,
+                "root",
+                rgba(0.16, 0.20, 0.28, 1.0),
+            ),
+            SunburstNode::new(
+                "small",
+                "Small",
+                Some("root"),
+                0.2,
+                "mix",
+                rgba(0.08, 0.43, 0.72, 0.86),
+            ),
+            SunburstNode::new(
+                "large",
+                "Large",
+                Some("root"),
+                0.3,
+                "mix",
+                rgba(0.13, 0.58, 0.52, 0.84),
+            ),
+        ])
+        .with_options(SunburstOptions::default().with_angular_gap(0.0));
+
+        let layout = spec.layout(ChartSize::new(420, 320)).unwrap();
+        let root = layout
+            .sectors
+            .iter()
+            .find(|sector| sector.id == "root")
+            .unwrap();
+        let children = layout
+            .sectors
+            .iter()
+            .filter(|sector| sector.parent == Some(0))
+            .collect::<Vec<_>>();
+
+        assert_near(layout.root_total, 0.5);
+        assert_near(
+            children.iter().map(|sector| sector.sweep()).sum::<f32>(),
+            root.sweep(),
+        );
+        assert_near(children[0].sweep(), root.sweep() * 0.6);
+        assert_eq!(children[0].id, "large");
+    }
+
+    #[test]
+    fn sunburst_zero_value_sectors_are_not_visible_pickable_or_snappable() {
+        let spec = SunburstSpec::new(vec![
+            SunburstNode::new(
+                "root",
+                "Root",
+                None::<String>,
+                0.0,
+                "root",
+                rgba(0.16, 0.20, 0.28, 1.0),
+            ),
+            SunburstNode::new(
+                "visible",
+                "Visible",
+                Some("root"),
+                1.0,
+                "mix",
+                rgba(0.08, 0.43, 0.72, 0.86),
+            ),
+            SunburstNode::new(
+                "zero",
+                "Zero",
+                Some("root"),
+                0.0,
+                "mix",
+                rgba(0.13, 0.58, 0.52, 0.84),
+            ),
+        ]);
+
+        let layout = spec.layout(ChartSize::new(420, 320)).unwrap();
+        let zero = layout
+            .sectors
+            .iter()
+            .find(|sector| sector.id == "zero")
+            .unwrap();
+
+        assert_near(zero.sweep(), 0.0);
+        assert!(!sector_contains(zero, zero.label_point(0.5)));
+
+        let chart = spec
+            .try_build_chart(Workspace::new(), ChartSize::new(420, 320))
+            .unwrap();
+        let labels = chart
+            .scene()
+            .guides
+            .iter()
+            .find_map(|guide| match guide {
+                Guide::Labels(labels) => Some(&labels.items),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!labels.iter().any(|label| label.text == "Zero"));
+
+        let snap_labels = chart
+            .snap_targets()
+            .into_iter()
+            .filter_map(|target| target.label)
+            .collect::<Vec<_>>();
+        assert!(!snap_labels.iter().any(|label| label == "Zero sector"));
+    }
+
+    #[test]
+    fn sunburst_rejects_nonfinite_layout_options() {
+        let spec = demo_spec().with_options(SunburstOptions::default().with_padding(f32::NAN));
+
+        assert!(matches!(
+            spec.layout(ChartSize::new(520, 420)).unwrap_err(),
+            SunburstError::InvalidOption { name, .. } if name == "padding"
+        ));
+    }
+
+    #[test]
+    fn sunburst_options_builders_preserve_chained_settings() {
+        let options = SunburstOptions::default()
+            .with_padding(12.0)
+            .with_inner_radius(24.0)
+            .with_ring_gap(1.5)
+            .with_angular_gap(0.0)
+            .with_start_angle(0.25)
+            .with_sweep_angle(TAU * 0.5)
+            .with_label_thresholds(0.12, 480.0)
+            .with_max_visible_labels(9)
+            .with_separator(rgba(0.2, 0.3, 0.4, 0.5), 0.75)
+            .with_sort_siblings_by_value(false);
+
+        assert_near(options.padding, 12.0);
+        assert_near(options.inner_radius, 24.0);
+        assert_near(options.ring_gap, 1.5);
+        assert_near(options.angular_gap, 0.0);
+        assert_near(options.start_angle, 0.25);
+        assert_near(options.sweep_angle, TAU * 0.5);
+        assert_near(options.min_label_sweep, 0.12);
+        assert_near(options.min_label_area, 480.0);
+        assert_eq!(options.max_visible_labels, 9);
+        assert_eq!(options.separator_color, rgba(0.2, 0.3, 0.4, 0.5));
+        assert_near(options.separator_width, 0.75);
+        assert!(!options.sort_siblings_by_value);
     }
 
     #[test]
