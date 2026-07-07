@@ -1,5 +1,37 @@
-//! Beeswarm: every sample as a non-overlapping dot. Useful when boxplot
+//! Beeswarm: every sample as a non-overlapping dot. Useful when a boxplot
 //! summary hides multi-modal structure or you want to see individual outliers.
+//!
+//! ## Layout algorithm
+//!
+//! Dots are placed group by group. Within a group, samples are processed in
+//! ascending value order (so their target screen `y` is monotonic) and each
+//! dot is given the `x` closest to the group centre that clears every
+//! already-placed neighbour by at least `2·radius + 1` px. Each nearby
+//! neighbour forbids a horizontal interval around its `x`; the new dot takes
+//! the nearest free position outside all of them. Because the scan is
+//! value-sorted it stops as soon as a neighbour is more than one separation
+//! away in `y`, and it is capped so a dense spike of near-identical values
+//! stays bounded rather than running away. Positions are clamped to
+//! `±(max_offset_ratio · slot)`, so the swarm never overflows its slot; when a
+//! band saturates, the closest in-bounds position is used.
+//!
+//! Non-finite samples are rejected at build time with
+//! [`BeeswarmError::NonFiniteValue`].
+//!
+//! ## Example
+//!
+//! ```
+//! use berthacharts_dist::beeswarm::{BeeswarmGroup, BeeswarmSpec};
+//! use berthacharts_dist::core::{ChartSize, Workspace};
+//!
+//! let spec = BeeswarmSpec::new(vec![
+//!     BeeswarmGroup::new("A", (1..=60).map(|i| (i % 12) as f32).collect()),
+//! ]);
+//! let chart = spec
+//!     .try_build_chart(Workspace::new(), ChartSize::new(480, 320))
+//!     .expect("valid beeswarm");
+//! assert_eq!(chart.scene().layers.len(), 1);
+//! ```
 
 use std::fmt;
 use std::sync::Arc;
@@ -93,15 +125,71 @@ impl BeeswarmSpec {
         self.options = options;
         self
     }
+
+    /// Validate the groups without building a chart.
+    ///
+    /// Rejects an empty spec, empty groups, empty labels, and any non-finite
+    /// sample value.
+    pub fn validate(&self) -> Result<(), BeeswarmError> {
+        if self.groups.is_empty() {
+            return Err(BeeswarmError::Empty);
+        }
+        for (i, g) in self.groups.iter().enumerate() {
+            if g.label.trim().is_empty() {
+                return Err(BeeswarmError::EmptyLabel(i));
+            }
+            if g.values.is_empty() {
+                return Err(BeeswarmError::EmptyGroup(i));
+            }
+            for &v in &g.values {
+                if !v.is_finite() {
+                    return Err(BeeswarmError::NonFiniteValue {
+                        label: g.label.clone(),
+                        value: v,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compute the reusable beeswarm layout without building a chart.
+    pub fn layout(&self, size: ChartSize) -> Result<BeeswarmLayout, BeeswarmError> {
+        self.validate()?;
+        Ok(compute_layout(
+            &self.groups,
+            &self.options,
+            size.full_viewport().plot_area,
+        ))
+    }
+
+    /// Compile this spec into a chart.
+    pub fn try_build_chart(
+        &self,
+        workspace: Arc<Workspace>,
+        size: ChartSize,
+    ) -> Result<Chart, BeeswarmError> {
+        <Self as ChartSpec>::build_chart(self, workspace, size)
+    }
 }
 
 /// Errors during beeswarm build.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum BeeswarmError {
     /// No groups supplied.
     Empty,
     /// Group has no samples.
     EmptyGroup(usize),
+    /// Group at the given index has an empty or whitespace-only label.
+    EmptyLabel(usize),
+    /// A sample value was non-finite (NaN or infinity).
+    NonFiniteValue {
+        /// Label of the offending group.
+        label: String,
+        /// The offending value.
+        value: f32,
+    },
 }
 
 impl fmt::Display for BeeswarmError {
@@ -109,6 +197,10 @@ impl fmt::Display for BeeswarmError {
         match self {
             Self::Empty => write!(f, "beeswarm has no groups"),
             Self::EmptyGroup(i) => write!(f, "group at index {i} has no samples"),
+            Self::EmptyLabel(i) => write!(f, "group at index {i} has an empty label"),
+            Self::NonFiniteValue { label, value } => {
+                write!(f, "beeswarm value for `{label}` is not finite: {value}")
+            }
         }
     }
 }
@@ -156,14 +248,7 @@ impl ChartSpec for BeeswarmSpec {
         workspace: Arc<Workspace>,
         size: ChartSize,
     ) -> Result<Chart, Self::Error> {
-        if self.groups.is_empty() {
-            return Err(BeeswarmError::Empty);
-        }
-        for (i, g) in self.groups.iter().enumerate() {
-            if g.values.is_empty() {
-                return Err(BeeswarmError::EmptyGroup(i));
-            }
-        }
+        self.validate()?;
         let viewport = size.full_viewport();
         let layout = compute_layout(&self.groups, &self.options, viewport.plot_area);
 
@@ -256,8 +341,8 @@ fn compute_layout(
     let map_y = |v: f32| inner.y + inner.h - (v - y_min) / (y_max - y_min) * inner.h;
 
     let slot = inner.w / n as f32;
-    let max_off = slot * options.max_offset_ratio;
-    let r = options.dot_radius;
+    let max_off = (slot * options.max_offset_ratio).max(0.0);
+    let r = options.dot_radius.max(0.1);
     let min_sep = 2.0 * r + 1.0;
 
     let group_layouts: Vec<BeeswarmGroupLayout> = groups
@@ -265,50 +350,15 @@ fn compute_layout(
         .enumerate()
         .map(|(gi, g)| {
             let center_x = inner.x + (gi as f32 + 0.5) * slot;
-            // Sort by value to make the swarm well-formed (ascending y order helps packing).
+            // Sort by value so screen y is monotonic; that lets the collision
+            // scan stop early and keeps the swarm symmetric.
             let mut indexed: Vec<(usize, f32)> = g.values.iter().copied().enumerate().collect();
             indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
             let mut placed: Vec<SwarmDot> = Vec::with_capacity(indexed.len());
             for (row, value) in indexed {
-                let y_target = map_y(value);
-                let mut offset_step = 0.0_f32;
-                let mut side = 1.0_f32;
-                let x;
-                let mut y = y_target;
-                // Pack: try offsets at increasing distance until clear of all
-                // already-placed neighbours within min_sep along y.
-                loop {
-                    let candidate_x = center_x + side * offset_step;
-                    let mut collides = false;
-                    for d in placed.iter().rev() {
-                        if (y - d.y).abs() > min_sep * 4.0 {
-                            // Past influence range (early termination since sorted by value)
-                            break;
-                        }
-                        let dx = candidate_x - d.x;
-                        let dy = y - d.y;
-                        if dx * dx + dy * dy < min_sep * min_sep {
-                            collides = true;
-                            break;
-                        }
-                    }
-                    if !collides {
-                        x = candidate_x.clamp(center_x - max_off, center_x + max_off);
-                        y = y_target;
-                        break;
-                    }
-                    side = -side;
-                    if side > 0.0 {
-                        offset_step += r * 0.6;
-                    }
-                    if offset_step > max_off {
-                        // Give up and place at the far edge.
-                        x = center_x + side * max_off;
-                        y = y_target;
-                        break;
-                    }
-                }
+                let y = map_y(value);
+                let x = place_dot(center_x, y, max_off, min_sep, &placed);
                 placed.push(SwarmDot {
                     x,
                     y,
@@ -328,6 +378,65 @@ fn compute_layout(
     BeeswarmLayout {
         groups: group_layouts,
     }
+}
+
+/// Upper bound on neighbours consulted when placing a dot. A dense spike of
+/// near-identical values would otherwise scan the whole group; the band is
+/// already saturated well before this many, so the cap keeps placement O(n)
+/// without changing the visible result.
+const MAX_NEIGHBOR_SCAN: usize = 128;
+
+/// Place one dot: return the x nearest `center_x` (within `±max_off`) that
+/// clears every nearby placed neighbour by `min_sep`. `placed` is ordered by
+/// descending y (samples arrive value-sorted), so the scan stops once a
+/// neighbour is at least `min_sep` away in y.
+fn place_dot(center_x: f32, y: f32, max_off: f32, min_sep: f32, placed: &[SwarmDot]) -> f32 {
+    let mut intervals: Vec<(f32, f32)> = Vec::new();
+    for d in placed.iter().rev().take(MAX_NEIGHBOR_SCAN) {
+        let dy = (y - d.y).abs();
+        if dy >= min_sep {
+            break;
+        }
+        // Horizontal half-width another dot forbids at this y offset.
+        let half = (min_sep * min_sep - dy * dy).max(0.0).sqrt();
+        intervals.push((d.x - half, d.x + half));
+    }
+    nearest_free_x(
+        center_x,
+        center_x - max_off,
+        center_x + max_off,
+        &mut intervals,
+    )
+}
+
+/// Choose the x closest to `center`, clamped to `[min_x, max_x]`, avoiding
+/// every forbidden interval. When the band is fully saturated the closest
+/// in-bounds position is returned (accepting overlap) so the swarm stays
+/// bounded.
+fn nearest_free_x(center: f32, min_x: f32, max_x: f32, intervals: &mut [(f32, f32)]) -> f32 {
+    if intervals.is_empty() {
+        return center.clamp(min_x, max_x);
+    }
+    intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // Candidate free positions: the centre plus each interval edge, all clamped
+    // into the allowed band. Rank by (is-free, distance-to-centre).
+    let mut best: Option<f32> = None;
+    let mut best_key: Option<(bool, f32)> = None;
+    let mut consider = |x: f32| {
+        let x = x.clamp(min_x, max_x);
+        let occupied = intervals.iter().any(|&(lo, hi)| x > lo && x < hi);
+        let key = (occupied, (x - center).abs());
+        if best_key.is_none_or(|bk| key < bk) {
+            best_key = Some(key);
+            best = Some(x);
+        }
+    };
+    consider(center);
+    for &(lo, hi) in intervals.iter() {
+        consider(lo);
+        consider(hi);
+    }
+    best.unwrap_or_else(|| center.clamp(min_x, max_x))
 }
 
 fn group_dataset(layout: &BeeswarmLayout) -> Dataset {
@@ -520,6 +629,90 @@ mod tests {
             Rect::new(0.0, 0.0, 400.0, 300.0),
         );
         assert_eq!(layout.groups[0].dots.len(), 20);
+    }
+
+    #[test]
+    fn identical_values_pack_without_overlap() {
+        let opts = BeeswarmOptions::default();
+        let layout = compute_layout(
+            &[BeeswarmGroup::new("a", vec![5.0; 20])],
+            &opts,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        let dots = &layout.groups[0].dots;
+        assert_eq!(dots.len(), 20);
+        let min_sep = 2.0 * opts.dot_radius + 1.0;
+        for i in 0..dots.len() {
+            for j in (i + 1)..dots.len() {
+                let dx = dots[i].x - dots[j].x;
+                let dy = dots[i].y - dots[j].y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                assert!(dist >= min_sep - 0.05, "dots {i},{j} overlap: dist {dist}");
+            }
+        }
+        let center = layout.groups[0].center_x;
+        let max_off = 340.0 * opts.max_offset_ratio;
+        for d in dots {
+            assert!(
+                (d.x - center).abs() <= max_off + 0.05,
+                "dot escaped slot: {}",
+                d.x
+            );
+        }
+    }
+
+    #[test]
+    fn dense_spike_stays_bounded_and_finite() {
+        let opts = BeeswarmOptions::default();
+        let layout = compute_layout(
+            &[BeeswarmGroup::new("a", vec![5.0; 500])],
+            &opts,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        let dots = &layout.groups[0].dots;
+        assert_eq!(dots.len(), 500);
+        let center = layout.groups[0].center_x;
+        let max_off = 340.0 * opts.max_offset_ratio;
+        for d in dots {
+            assert!(d.x.is_finite() && d.y.is_finite());
+            assert!(
+                (d.x - center).abs() <= max_off + 0.05,
+                "dot escaped slot: {}",
+                d.x
+            );
+        }
+    }
+
+    #[test]
+    fn non_finite_value_rejected() {
+        let err = BeeswarmSpec::new(vec![BeeswarmGroup::new("a", vec![1.0, f32::NAN])])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .unwrap_err();
+        assert!(matches!(err, BeeswarmError::NonFiniteValue { .. }));
+    }
+
+    #[test]
+    fn degenerate_sizes_do_not_panic() {
+        for size in [
+            ChartSize::new(0, 0),
+            ChartSize::new(1, 1),
+            ChartSize::new(0, 300),
+            ChartSize::new(400, 0),
+        ] {
+            let _ = BeeswarmSpec::new(vec![BeeswarmGroup::new("a", vec![1.0, 2.0, 3.0])])
+                .try_build_chart(berthacharts_core::Workspace::new(), size);
+        }
+    }
+
+    #[test]
+    fn layout_matches_dot_count() {
+        let layout = BeeswarmSpec::new(vec![BeeswarmGroup::new("a", vec![1.0, 2.0, 3.0])])
+            .layout(ChartSize::new(400, 300))
+            .expect("layout");
+        assert_eq!(layout.groups[0].dots.len(), 3);
     }
 
     #[test]

@@ -1,7 +1,41 @@
 //! Violin plot: kernel-density mirror per group, drawn as a filled path.
 //!
-//! Uses a simple Gaussian kernel with a Silverman's-rule bandwidth heuristic.
-//! No external stats dependency — KDE is computed inline.
+//! ## Statistical method
+//!
+//! Each group's density is a Gaussian kernel-density estimate evaluated at
+//! [`ViolinOptions::resolution`] points spanning `[min − 1.5h, max + 1.5h]`,
+//! so the tails close smoothly just past the data. The bandwidth `h` defaults
+//! to Silverman's rule of thumb
+//!
+//! ```text
+//! h = 0.9 · min(σ, IQR / 1.349) · n^(−1/5)
+//! ```
+//!
+//! where `σ` is the (population) standard deviation and `IQR` the interquartile
+//! range. Taking `min(σ, IQR/1.349)` makes the estimate robust to heavy tails
+//! and outliers. It can be overridden with [`ViolinOptions::bandwidth`].
+//!
+//! Degenerate groups are handled without panicking: a single sample, or an
+//! all-identical group (σ = 0 and IQR = 0), falls back to a unit bandwidth so
+//! the violin renders a small finite blob rather than an infinitely thin
+//! spike. Non-finite samples are rejected at build time with
+//! [`ViolinError::NonFiniteValue`]. No external stats dependency — the KDE is
+//! computed inline.
+//!
+//! ## Example
+//!
+//! ```
+//! use berthacharts_dist::violin::{ViolinGroup, ViolinSpec};
+//! use berthacharts_dist::core::{ChartSize, Workspace};
+//!
+//! let spec = ViolinSpec::new(vec![
+//!     ViolinGroup::new("A", (1..=40).map(|i| i as f32).collect()),
+//! ]);
+//! let chart = spec
+//!     .try_build_chart(Workspace::new(), ChartSize::new(480, 320))
+//!     .expect("valid violin");
+//! assert_eq!(chart.scene().layers.len(), 1);
+//! ```
 
 use std::fmt;
 use std::sync::Arc;
@@ -98,15 +132,71 @@ impl ViolinSpec {
         self.options = options;
         self
     }
+
+    /// Validate the groups without building a chart.
+    ///
+    /// Rejects an empty spec, empty groups, empty labels, and any non-finite
+    /// sample value.
+    pub fn validate(&self) -> Result<(), ViolinError> {
+        if self.groups.is_empty() {
+            return Err(ViolinError::Empty);
+        }
+        for (i, g) in self.groups.iter().enumerate() {
+            if g.label.trim().is_empty() {
+                return Err(ViolinError::EmptyLabel(i));
+            }
+            if g.values.is_empty() {
+                return Err(ViolinError::EmptyGroup(i));
+            }
+            for &v in &g.values {
+                if !v.is_finite() {
+                    return Err(ViolinError::NonFiniteValue {
+                        label: g.label.clone(),
+                        value: v,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compute the reusable violin layout without building a chart.
+    pub fn layout(&self, size: ChartSize) -> Result<ViolinLayout, ViolinError> {
+        self.validate()?;
+        Ok(compute_layout(
+            &self.groups,
+            &self.options,
+            size.full_viewport().plot_area,
+        ))
+    }
+
+    /// Compile this spec into a chart.
+    pub fn try_build_chart(
+        &self,
+        workspace: Arc<Workspace>,
+        size: ChartSize,
+    ) -> Result<Chart, ViolinError> {
+        <Self as ChartSpec>::build_chart(self, workspace, size)
+    }
 }
 
 /// Errors during violin build.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ViolinError {
     /// No groups supplied.
     Empty,
     /// Group has no samples.
     EmptyGroup(usize),
+    /// Group at the given index has an empty or whitespace-only label.
+    EmptyLabel(usize),
+    /// A sample value was non-finite (NaN or infinity).
+    NonFiniteValue {
+        /// Label of the offending group.
+        label: String,
+        /// The offending value.
+        value: f32,
+    },
 }
 
 impl fmt::Display for ViolinError {
@@ -114,6 +204,10 @@ impl fmt::Display for ViolinError {
         match self {
             Self::Empty => write!(f, "violin plot has no groups"),
             Self::EmptyGroup(i) => write!(f, "group at index {i} has no samples"),
+            Self::EmptyLabel(i) => write!(f, "group at index {i} has an empty label"),
+            Self::NonFiniteValue { label, value } => {
+                write!(f, "violin value for `{label}` is not finite: {value}")
+            }
         }
     }
 }
@@ -135,6 +229,8 @@ pub struct ViolinShape {
     pub count: usize,
     /// Minimum source sample value.
     pub min: f32,
+    /// Median source sample value (type-7 linear interpolation).
+    pub median: f32,
     /// Maximum source sample value.
     pub max: f32,
 }
@@ -154,14 +250,7 @@ impl ChartSpec for ViolinSpec {
         workspace: Arc<Workspace>,
         size: ChartSize,
     ) -> Result<Chart, Self::Error> {
-        if self.groups.is_empty() {
-            return Err(ViolinError::Empty);
-        }
-        for (i, g) in self.groups.iter().enumerate() {
-            if g.values.is_empty() {
-                return Err(ViolinError::EmptyGroup(i));
-            }
-        }
+        self.validate()?;
         let viewport = size.full_viewport();
         let layout = compute_layout(&self.groups, &self.options, viewport.plot_area);
 
@@ -195,6 +284,7 @@ impl ChartSpec for ViolinSpec {
                 GROUP_DATASET,
                 vec![
                     TooltipField::new("N", "count").as_integer(),
+                    TooltipField::new("Median", "median").as_number(2),
                     TooltipField::new("Min", "min").as_number(2),
                     TooltipField::new("Max", "max").as_number(2),
                 ],
@@ -216,16 +306,46 @@ impl ChartSpec for ViolinSpec {
     }
 }
 
-fn silverman_bandwidth(values: &[f32]) -> f32 {
-    let n = values.len() as f32;
-    if n < 2.0 {
+/// Silverman's rule-of-thumb bandwidth: `h = 0.9 · min(σ, IQR/1.349) · n^(−1/5)`.
+///
+/// `sorted` must be ascending. Falls back to a unit bandwidth for a single
+/// sample or a fully degenerate (zero-spread) group so the KDE stays finite.
+fn silverman_bandwidth(sorted: &[f32]) -> f32 {
+    let n = sorted.len();
+    if n < 2 {
         return 1.0;
     }
-    let mean = values.iter().sum::<f32>() / n;
-    let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / n;
+    let nf = n as f32;
+    let mean = sorted.iter().sum::<f32>() / nf;
+    let var = sorted.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / nf;
     let stddev = var.sqrt();
-    let bw = 1.06 * stddev * n.powf(-0.2);
-    bw.max(1e-3)
+    let iqr = quantile_sorted(sorted, 0.75) - quantile_sorted(sorted, 0.25);
+    let spread = if iqr > 0.0 {
+        stddev.min(iqr / 1.349)
+    } else {
+        stddev
+    };
+    let bw = 0.9 * spread * nf.powf(-0.2);
+    if bw.is_finite() && bw > 0.0 {
+        bw
+    } else {
+        1.0
+    }
+}
+
+/// Type-7 (linear-interpolation) quantile of an ascending slice.
+fn quantile_sorted(sorted: &[f32], q: f32) -> f32 {
+    match sorted.len() {
+        0 => f32::NAN,
+        1 => sorted[0],
+        len => {
+            let pos = q * (len as f32 - 1.0);
+            let lo = pos.floor() as usize;
+            let hi = (lo + 1).min(len - 1);
+            let frac = pos - lo as f32;
+            sorted[lo] * (1.0 - frac) + sorted[hi] * frac
+        }
+    }
 }
 
 fn gaussian_kde(values: &[f32], at: f32, bandwidth: f32) -> f32 {
@@ -275,12 +395,17 @@ fn compute_layout(groups: &[ViolinGroup], options: &ViolinOptions, plot: Rect) -
         .enumerate()
         .map(|(i, g)| {
             let center_x = inner.x + (i as f32 + 0.5) * slot;
+            // Values were validated finite before layout; sort once so the
+            // bandwidth, median, and range all read from the same buffer.
+            let mut sorted = g.values.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let g_min = *sorted.first().unwrap_or(&0.0);
+            let g_max = *sorted.last().unwrap_or(&0.0);
+            let median = quantile_sorted(&sorted, 0.5);
             let bw = options
                 .bandwidth
-                .unwrap_or_else(|| silverman_bandwidth(&g.values));
+                .unwrap_or_else(|| silverman_bandwidth(&sorted));
             // Compute densities at resolution samples spanning the group's range.
-            let g_min = g.values.iter().copied().fold(f32::INFINITY, f32::min);
-            let g_max = g.values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             let lo = g_min - bw * 1.5;
             let hi = g_max + bw * 1.5;
             let res = options.resolution.max(8);
@@ -289,7 +414,7 @@ fn compute_layout(groups: &[ViolinGroup], options: &ViolinOptions, plot: Rect) -
             for s in 0..res {
                 let t = s as f32 / (res - 1) as f32;
                 let v = lo + (hi - lo) * t;
-                let d = gaussian_kde(&g.values, v, bw);
+                let d = gaussian_kde(&sorted, v, bw);
                 densities.push((v, d));
                 if d > max_d {
                     max_d = d;
@@ -313,6 +438,7 @@ fn compute_layout(groups: &[ViolinGroup], options: &ViolinOptions, plot: Rect) -
                 polygon,
                 count: g.values.len(),
                 min: g_min,
+                median,
                 max: g_max,
             }
         })
@@ -326,12 +452,14 @@ fn group_dataset(layout: &ViolinLayout) -> Dataset {
     let mut cx: Vec<f32> = Vec::new();
     let mut count: Vec<i64> = Vec::new();
     let mut min: Vec<f32> = Vec::new();
+    let mut median: Vec<f32> = Vec::new();
     let mut max: Vec<f32> = Vec::new();
     for s in &layout.shapes {
         label.push(Arc::from(s.label.as_str()));
         cx.push(s.center_x);
         count.push(s.count as i64);
         min.push(s.min);
+        median.push(s.median);
         max.push(s.max);
     }
     Dataset::new(
@@ -342,6 +470,7 @@ fn group_dataset(layout: &ViolinLayout) -> Dataset {
             ("center_x".to_string(), Column::F32(ColumnData::new(cx))),
             ("count".to_string(), Column::I64(ColumnData::new(count))),
             ("min".to_string(), Column::F32(ColumnData::new(min))),
+            ("median".to_string(), Column::F32(ColumnData::new(median))),
             ("max".to_string(), Column::F32(ColumnData::new(max))),
         ],
     )
@@ -552,6 +681,80 @@ mod tests {
             (right_offset - left_offset).abs() < 1e-2,
             "right_offset {right_offset} != left_offset {left_offset}"
         );
+    }
+
+    #[test]
+    fn silverman_falls_back_on_zero_spread() {
+        assert_eq!(silverman_bandwidth(&[5.0; 10]), 1.0);
+        assert_eq!(silverman_bandwidth(&[7.0]), 1.0);
+    }
+
+    #[test]
+    fn silverman_is_positive_and_robust() {
+        let mut spread: Vec<f32> = (1..=50).map(|i| i as f32).collect();
+        spread.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let bw = silverman_bandwidth(&spread);
+        assert!(bw.is_finite() && bw > 0.0, "bw = {bw}");
+        // A single extreme outlier must not blow up the (robust) bandwidth: the
+        // IQR/1.349 term caps growth versus a pure-σ rule.
+        let mut with_outlier = spread.clone();
+        with_outlier.push(10_000.0);
+        with_outlier.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let bw_out = silverman_bandwidth(&with_outlier);
+        assert!(bw_out < bw * 3.0, "bw_out {bw_out} vs bw {bw}");
+    }
+
+    #[test]
+    fn non_finite_value_rejected() {
+        let err = ViolinSpec::new(vec![ViolinGroup::new("a", vec![1.0, f32::INFINITY])])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .unwrap_err();
+        assert!(matches!(err, ViolinError::NonFiniteValue { .. }));
+    }
+
+    #[test]
+    fn identical_values_yield_finite_polygon() {
+        let layout = compute_layout(
+            &[ViolinGroup::new("a", vec![5.0, 5.0, 5.0, 5.0])],
+            &ViolinOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        let shape = &layout.shapes[0];
+        assert!(shape
+            .polygon
+            .iter()
+            .all(|p| p[0].is_finite() && p[1].is_finite()));
+        assert_eq!(shape.median, 5.0);
+    }
+
+    #[test]
+    fn median_exposed_in_dataset() {
+        let workspace = berthacharts_core::Workspace::new();
+        ViolinSpec::new(vec![ViolinGroup::new("a", vec![1.0, 2.0, 3.0, 4.0, 5.0])])
+            .try_build_chart(workspace.clone(), ChartSize::new(400, 300))
+            .expect("chart");
+        let dataset = workspace.dataset(GROUP_DATASET).expect("group dataset");
+        let median = match dataset.column("median").expect("median").as_ref() {
+            Column::F32(values) => values,
+            other => panic!("expected f32 median column, got {}", other.dtype()),
+        };
+        assert!((median.values[0] - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn degenerate_sizes_do_not_panic() {
+        for size in [
+            ChartSize::new(0, 0),
+            ChartSize::new(1, 1),
+            ChartSize::new(0, 300),
+            ChartSize::new(400, 0),
+        ] {
+            let _ = ViolinSpec::new(vec![ViolinGroup::new("a", vec![1.0, 2.0, 3.0])])
+                .try_build_chart(berthacharts_core::Workspace::new(), size);
+        }
     }
 
     #[test]

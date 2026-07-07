@@ -1,7 +1,34 @@
 //! Empirical Cumulative Distribution Function (ECDF).
 //!
-//! For each input series, draws a step function: x = sample value (sorted),
-//! y = cumulative fraction (0..1). Multiple series overlay for comparison.
+//! For each input series, draws a right-continuous step function: `x` = sample
+//! value (sorted ascending), `y` = cumulative fraction `F(x) = #{xᵢ ≤ x} / n`
+//! in `[0, 1]`. Multiple series overlay for comparison.
+//!
+//! ## Ties
+//!
+//! Repeated values are collapsed into a single jump: at each distinct value the
+//! curve rises by `(count of ties) / n` in one vertical step, so `m` identical
+//! samples produce one riser of height `m/n` rather than `m` coincident risers.
+//! A series of `d` distinct values therefore has `2·d + 1` vertices.
+//!
+//! Non-finite samples are rejected at build time with
+//! [`EcdfError::NonFiniteValue`].
+//!
+//! ## Example
+//!
+//! ```
+//! use berthacharts_dist::ecdf::{EcdfSeries, EcdfSpec};
+//! use berthacharts_dist::core::{ChartSize, Workspace};
+//!
+//! let spec = EcdfSpec::new(vec![
+//!     EcdfSeries::new("A", vec![1.0, 2.0, 2.0, 3.0, 5.0]),
+//!     EcdfSeries::new("B", vec![2.0, 4.0, 6.0]),
+//! ]);
+//! let chart = spec
+//!     .try_build_chart(Workspace::new(), ChartSize::new(480, 320))
+//!     .expect("valid ECDF");
+//! assert_eq!(chart.scene().layers.len(), 1);
+//! ```
 
 use std::fmt;
 use std::sync::Arc;
@@ -92,15 +119,71 @@ impl EcdfSpec {
         self.options = options;
         self
     }
+
+    /// Validate the series without building a chart.
+    ///
+    /// Rejects an empty spec, empty series, empty labels, and any non-finite
+    /// sample value.
+    pub fn validate(&self) -> Result<(), EcdfError> {
+        if self.series.is_empty() {
+            return Err(EcdfError::Empty);
+        }
+        for (i, s) in self.series.iter().enumerate() {
+            if s.label.trim().is_empty() {
+                return Err(EcdfError::EmptyLabel(i));
+            }
+            if s.values.is_empty() {
+                return Err(EcdfError::EmptySeries(i));
+            }
+            for &v in &s.values {
+                if !v.is_finite() {
+                    return Err(EcdfError::NonFiniteValue {
+                        label: s.label.clone(),
+                        value: v,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compute the reusable ECDF layout without building a chart.
+    pub fn layout(&self, size: ChartSize) -> Result<EcdfLayout, EcdfError> {
+        self.validate()?;
+        Ok(compute_layout(
+            &self.series,
+            &self.options,
+            size.full_viewport().plot_area,
+        ))
+    }
+
+    /// Compile this spec into a chart.
+    pub fn try_build_chart(
+        &self,
+        workspace: Arc<Workspace>,
+        size: ChartSize,
+    ) -> Result<Chart, EcdfError> {
+        <Self as ChartSpec>::build_chart(self, workspace, size)
+    }
 }
 
 /// Errors during ECDF build.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum EcdfError {
     /// No series supplied.
     Empty,
     /// Series at index has no samples.
     EmptySeries(usize),
+    /// Series at the given index has an empty or whitespace-only label.
+    EmptyLabel(usize),
+    /// A sample value was non-finite (NaN or infinity).
+    NonFiniteValue {
+        /// Label of the offending series.
+        label: String,
+        /// The offending value.
+        value: f32,
+    },
 }
 
 impl fmt::Display for EcdfError {
@@ -108,6 +191,10 @@ impl fmt::Display for EcdfError {
         match self {
             Self::Empty => write!(f, "ECDF spec has no series"),
             Self::EmptySeries(i) => write!(f, "series at index {i} has no samples"),
+            Self::EmptyLabel(i) => write!(f, "series at index {i} has an empty label"),
+            Self::NonFiniteValue { label, value } => {
+                write!(f, "ECDF value for `{label}` is not finite: {value}")
+            }
         }
     }
 }
@@ -140,15 +227,7 @@ impl ChartSpec for EcdfSpec {
         workspace: Arc<Workspace>,
         size: ChartSize,
     ) -> Result<Chart, Self::Error> {
-        if self.series.is_empty() {
-            return Err(EcdfError::Empty);
-        }
-        for (i, s) in self.series.iter().enumerate() {
-            if s.values.is_empty() {
-                return Err(EcdfError::EmptySeries(i));
-            }
-        }
-
+        self.validate()?;
         let viewport = size.full_viewport();
         let layout = compute_layout(&self.series, &self.options, viewport.plot_area);
 
@@ -287,15 +366,25 @@ fn compute_layout(series: &[EcdfSeries], options: &EcdfOptions, plot: Rect) -> E
             if let Some(&first) = sorted.first() {
                 points.push([map_x(first), map_y(0.0)]);
             }
-            for (i, &v) in sorted.iter().enumerate() {
-                let frac = (i as f32 + 1.0) / n;
+            // Walk distinct values, collapsing ties into one jump of height
+            // (#ties / n) so F(x) = #{xᵢ ≤ x} / n is exact and the polyline has
+            // no zero-length risers.
+            let mut i = 0;
+            while i < sorted.len() {
+                let v = sorted[i];
+                let mut j = i + 1;
+                while j < sorted.len() && sorted[j] == v {
+                    j += 1;
+                }
+                let frac = j as f32 / n;
                 let x_px = map_x(v);
-                // horizontal step from previous y to this x
+                // horizontal step from previous cumulative height to this x
                 if let Some(&last) = points.last() {
                     points.push([x_px, last[1]]);
                 }
-                // vertical step up to new y
+                // vertical step up to the new cumulative height
                 points.push([x_px, map_y(frac)]);
+                i = j;
             }
             EcdfSeriesLayout {
                 label,
@@ -435,14 +524,77 @@ mod tests {
     }
 
     #[test]
-    fn step_polyline_has_2n_plus_one_points() {
-        // n samples → start point + 2n step points = 2n+1
+    fn step_polyline_has_2d_plus_one_points() {
+        // d distinct values → start point + 2d step points = 2d+1
         let layout = compute_layout(
             &[EcdfSeries::new("a", vec![1.0, 2.0, 3.0])],
             &EcdfOptions::default(),
             Rect::new(0.0, 0.0, 400.0, 300.0),
         );
         assert_eq!(layout.series[0].points.len(), 7);
+    }
+
+    #[test]
+    fn ties_collapse_into_single_jump() {
+        // [1,1,2,2,2] has 2 distinct values → 2·2 + 1 = 5 vertices. After the
+        // first distinct value F jumps to 2/5, so the vertex sits at
+        // map_y(0.4) = 30 + 240 − 0.4·240 = 174 on a 400×300 canvas.
+        let layout = compute_layout(
+            &[EcdfSeries::new("a", vec![1.0, 1.0, 2.0, 2.0, 2.0])],
+            &EcdfOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        let points = &layout.series[0].points;
+        assert_eq!(points.len(), 5);
+        assert!((points[2][1] - 174.0).abs() < 1e-3, "y = {}", points[2][1]);
+        // The final cumulative height reaches F = 1 (top of the plot, y = 30).
+        assert!((points[4][1] - 30.0).abs() < 1e-3, "y = {}", points[4][1]);
+    }
+
+    #[test]
+    fn non_finite_value_rejected() {
+        let err = EcdfSpec::new(vec![EcdfSeries::new("a", vec![1.0, f32::NAN])])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .unwrap_err();
+        assert!(matches!(err, EcdfError::NonFiniteValue { .. }));
+    }
+
+    #[test]
+    fn empty_label_rejected() {
+        let err = EcdfSpec::new(vec![EcdfSeries::new("  ", vec![1.0, 2.0])])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .unwrap_err();
+        assert!(matches!(err, EcdfError::EmptyLabel(0)));
+    }
+
+    #[test]
+    fn degenerate_sizes_do_not_panic() {
+        for size in [
+            ChartSize::new(0, 0),
+            ChartSize::new(1, 1),
+            ChartSize::new(0, 300),
+            ChartSize::new(400, 0),
+        ] {
+            let _ = EcdfSpec::new(vec![EcdfSeries::new("a", vec![1.0, 2.0, 3.0])])
+                .try_build_chart(berthacharts_core::Workspace::new(), size);
+        }
+    }
+
+    #[test]
+    fn layout_matches_series_count() {
+        let layout = EcdfSpec::new(vec![
+            EcdfSeries::new("a", vec![1.0, 2.0]),
+            EcdfSeries::new("b", vec![3.0, 4.0]),
+        ])
+        .layout(ChartSize::new(400, 300))
+        .expect("layout");
+        assert_eq!(layout.series.len(), 2);
     }
 
     #[test]

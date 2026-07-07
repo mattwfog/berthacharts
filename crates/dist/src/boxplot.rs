@@ -1,6 +1,36 @@
-//! Box-and-whisker plot. One box per group; whiskers extend to the
-//! farthest non-outlier point inside `whisker_factor × IQR`. Outliers render
-//! as individual points.
+//! Box-and-whisker plot. One box per group.
+//!
+//! ## Statistical method
+//!
+//! - **Quartiles** use linear interpolation between the two closest ranks
+//!   (position `q · (n − 1)`). This is the type-7 quantile of Hyndman & Fan,
+//!   i.e. the default of NumPy, pandas, and R's `quantile()`. It is *not* the
+//!   Tukey-hinge method, so for even `n` the hinges differ slightly.
+//! - **Whiskers** follow Tukey's rule: they extend to the farthest sample
+//!   still inside the fence `[Q1 − k·IQR, Q3 + k·IQR]`, where `k` is
+//!   [`BoxPlotOptions::whisker_factor`] (1.5 by default). Samples outside the
+//!   fence are drawn as individual outlier points.
+//!
+//! Degenerate groups are handled without panicking: a single sample or an
+//! all-identical group has zero IQR, empty whiskers collapse onto the median,
+//! and no points are flagged as outliers. Non-finite samples are rejected at
+//! build time with [`BoxPlotError::NonFiniteValue`].
+//!
+//! ## Example
+//!
+//! ```
+//! use berthacharts_dist::boxplot::{BoxPlotGroup, BoxPlotSpec};
+//! use berthacharts_dist::core::{ChartSize, Workspace};
+//!
+//! let spec = BoxPlotSpec::new(vec![
+//!     BoxPlotGroup::new("control", vec![1.0, 2.0, 3.0, 4.0, 5.0]),
+//!     BoxPlotGroup::new("treatment", vec![2.0, 4.0, 4.0, 5.0, 9.0]),
+//! ]);
+//! let chart = spec
+//!     .try_build_chart(Workspace::new(), ChartSize::new(480, 320))
+//!     .expect("valid box plot");
+//! assert_eq!(chart.scene().layers.len(), 1);
+//! ```
 
 use std::fmt;
 use std::sync::Arc;
@@ -121,15 +151,71 @@ impl BoxPlotSpec {
         self.options = options;
         self
     }
+
+    /// Validate the groups without building a chart.
+    ///
+    /// Rejects an empty spec, empty groups, empty labels, and any non-finite
+    /// sample value.
+    pub fn validate(&self) -> Result<(), BoxPlotError> {
+        if self.groups.is_empty() {
+            return Err(BoxPlotError::Empty);
+        }
+        for (i, g) in self.groups.iter().enumerate() {
+            if g.label.trim().is_empty() {
+                return Err(BoxPlotError::EmptyLabel(i));
+            }
+            if g.values.is_empty() {
+                return Err(BoxPlotError::EmptyGroup(i));
+            }
+            for &v in &g.values {
+                if !v.is_finite() {
+                    return Err(BoxPlotError::NonFiniteValue {
+                        label: g.label.clone(),
+                        value: v,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compute the reusable box-plot layout without building a chart.
+    pub fn layout(&self, size: ChartSize) -> Result<BoxPlotLayout, BoxPlotError> {
+        self.validate()?;
+        Ok(compute_layout(
+            &self.groups,
+            &self.options,
+            size.full_viewport().plot_area,
+        ))
+    }
+
+    /// Compile this spec into a chart.
+    pub fn try_build_chart(
+        &self,
+        workspace: Arc<Workspace>,
+        size: ChartSize,
+    ) -> Result<Chart, BoxPlotError> {
+        <Self as ChartSpec>::build_chart(self, workspace, size)
+    }
 }
 
 /// Errors during box-plot build.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum BoxPlotError {
     /// No groups supplied.
     Empty,
     /// Group at the given index has zero samples.
     EmptyGroup(usize),
+    /// Group at the given index has an empty or whitespace-only label.
+    EmptyLabel(usize),
+    /// A sample value was non-finite (NaN or infinity).
+    NonFiniteValue {
+        /// Label of the offending group.
+        label: String,
+        /// The offending value.
+        value: f32,
+    },
 }
 
 impl fmt::Display for BoxPlotError {
@@ -137,6 +223,10 @@ impl fmt::Display for BoxPlotError {
         match self {
             Self::Empty => write!(f, "box plot has no groups"),
             Self::EmptyGroup(i) => write!(f, "group at index {i} has no samples"),
+            Self::EmptyLabel(i) => write!(f, "group at index {i} has an empty label"),
+            Self::NonFiniteValue { label, value } => {
+                write!(f, "box plot value for `{label}` is not finite: {value}")
+            }
         }
     }
 }
@@ -185,14 +275,7 @@ impl ChartSpec for BoxPlotSpec {
         workspace: Arc<Workspace>,
         size: ChartSize,
     ) -> Result<Chart, Self::Error> {
-        if self.groups.is_empty() {
-            return Err(BoxPlotError::Empty);
-        }
-        for (i, g) in self.groups.iter().enumerate() {
-            if g.values.is_empty() {
-                return Err(BoxPlotError::EmptyGroup(i));
-            }
-        }
+        self.validate()?;
         let viewport = size.full_viewport();
         let layout = compute_layout(&self.groups, &self.options, viewport.plot_area);
 
@@ -270,7 +353,12 @@ impl ChartSpec for BoxPlotSpec {
     }
 }
 
-/// Compute Tukey-style quartiles + whiskers for a single sample.
+/// Compute quartiles and Tukey whiskers for a single sample.
+///
+/// Quartiles use type-7 linear interpolation (NumPy/pandas/R default); the
+/// whiskers extend to the farthest sample inside the `whisker_factor · IQR`
+/// fence, and samples beyond it are returned as outliers. Non-finite inputs
+/// are ignored; an empty sample yields `NaN` quartiles.
 #[must_use]
 pub fn compute_stats(values: &[f32], whisker_factor: f32) -> BoxPlotStats {
     let mut v: Vec<f32> = values.iter().copied().filter(|x| x.is_finite()).collect();
@@ -765,6 +853,86 @@ mod tests {
         assert!((percentile(&v, 0.0) - 1.0).abs() < 1e-5);
         assert!((percentile(&v, 0.50) - 3.0).abs() < 1e-5);
         assert!((percentile(&v, 1.0) - 5.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn quartiles_use_type7_linear_interpolation() {
+        // Hand-computed for 1..=8 with position q·(n−1):
+        //   Q1 at 1.75 → 2·0.25 + 3·0.75 = 2.75
+        //   median at 3.5 → 4·0.5 + 5·0.5 = 4.5
+        //   Q3 at 5.25 → 6·0.75 + 7·0.25 = 6.25
+        // (Tukey hinges would give 2.5 / 6.5, so this fails if the method changes.)
+        let s = compute_stats(&(1..=8).map(|i| i as f32).collect::<Vec<_>>(), 1.5);
+        assert!((s.q1 - 2.75).abs() < 1e-5, "q1 = {}", s.q1);
+        assert!((s.median - 4.5).abs() < 1e-5, "median = {}", s.median);
+        assert!((s.q3 - 6.25).abs() < 1e-5, "q3 = {}", s.q3);
+    }
+
+    #[test]
+    fn single_sample_group_collapses_without_outliers() {
+        let s = compute_stats(&[42.0], 1.5);
+        assert_eq!(s.q1, 42.0);
+        assert_eq!(s.median, 42.0);
+        assert_eq!(s.q3, 42.0);
+        assert_eq!(s.lower_whisker, 42.0);
+        assert_eq!(s.upper_whisker, 42.0);
+        assert!(s.outliers.is_empty());
+        assert_eq!(s.count, 1);
+    }
+
+    #[test]
+    fn identical_values_have_zero_iqr_and_no_outliers() {
+        let s = compute_stats(&[5.0, 5.0, 5.0, 5.0], 1.5);
+        assert!((s.q3 - s.q1).abs() < 1e-6);
+        assert!(s.outliers.is_empty());
+        assert_eq!(s.lower_whisker, 5.0);
+        assert_eq!(s.upper_whisker, 5.0);
+    }
+
+    #[test]
+    fn non_finite_value_rejected() {
+        let err = BoxPlotSpec::new(vec![BoxPlotGroup::new("a", vec![1.0, f32::NAN, 3.0])])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .unwrap_err();
+        assert!(matches!(err, BoxPlotError::NonFiniteValue { .. }));
+    }
+
+    #[test]
+    fn empty_label_rejected() {
+        let err = BoxPlotSpec::new(vec![BoxPlotGroup::new("   ", vec![1.0, 2.0])])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .unwrap_err();
+        assert!(matches!(err, BoxPlotError::EmptyLabel(0)));
+    }
+
+    #[test]
+    fn degenerate_sizes_do_not_panic() {
+        for size in [
+            ChartSize::new(0, 0),
+            ChartSize::new(1, 1),
+            ChartSize::new(0, 300),
+            ChartSize::new(400, 0),
+        ] {
+            let _ = BoxPlotSpec::new(vec![BoxPlotGroup::new("a", vec![1.0, 2.0, 3.0])])
+                .try_build_chart(berthacharts_core::Workspace::new(), size);
+        }
+    }
+
+    #[test]
+    fn layout_matches_group_count() {
+        let layout = BoxPlotSpec::new(vec![
+            BoxPlotGroup::new("A", vec![1.0, 2.0, 3.0]),
+            BoxPlotGroup::new("B", vec![4.0, 5.0, 6.0]),
+        ])
+        .layout(ChartSize::new(400, 300))
+        .expect("layout");
+        assert_eq!(layout.groups.len(), 2);
     }
 
     #[test]
