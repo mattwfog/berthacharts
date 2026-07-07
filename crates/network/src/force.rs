@@ -1,11 +1,15 @@
-//! Force-directed graph layout (v0).
+//! Force-directed graph layout.
 //!
 //! Iterative physics simulation: nodes repel each other (Coulomb-style),
 //! edges attract their endpoints (Hooke-style), gravity pulls toward the
-//! plot-area centre. Iterates until energy stabilises.
+//! plot-area centre. Alpha cooling decays the forces each step so the system
+//! settles; the solver stops early once total kinetic energy stabilises.
 //!
-//! v0 ships an O(n²) repulsion pass — fine up to ~500 nodes. Future v1
-//! adds Barnes-Hut for larger graphs.
+//! Repulsion runs through a Barnes-Hut quadtree (`O(n log n)`) by default,
+//! with an exact `O(n²)` pair pass retained for small graphs and correctness
+//! tests (see [`ForceOptions::use_barnes_hut`]). Layout is fully deterministic:
+//! seed positions come from a golden-angle spiral — never a clock or RNG — so
+//! the same nodes, edges, and options always produce the same picture.
 
 use std::fmt;
 use std::sync::Arc;
@@ -38,6 +42,13 @@ const X_SCALE: ScaleId = ScaleId::new(1);
 const Y_SCALE: ScaleId = ScaleId::new(2);
 const COORD: CoordId = CoordId::new(0);
 
+/// Golden angle (radians) driving the deterministic spiral seed layout.
+const GOLDEN_ANGLE: f32 = 2.399_963_2;
+/// Highlighted nodes render (and pick) at this multiple of their base radius.
+const HIGHLIGHT_RADIUS_SCALE: f32 = 1.15;
+/// Base pixel radius of a self-loop before per-sibling fan spacing is added.
+const SELF_LOOP_BASE_RADIUS: f32 = 18.0;
+
 /// A node in the input graph.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForceNode {
@@ -51,7 +62,8 @@ pub struct ForceNode {
     pub color: [f32; 4],
     /// If true, the node is pinned at its initial position.
     pub fixed: bool,
-    /// Optional initial position. If `None`, randomised.
+    /// Optional seed position. `None` — or a non-finite value — places the node
+    /// deterministically on a golden-angle spiral around the plot centre.
     pub initial: Option<[f32; 2]>,
 }
 
@@ -215,6 +227,28 @@ impl ForceSpec {
         }
     }
 
+    /// Build a spec from an edge list alone, inferring nodes in first-seen
+    /// order (source before target within each edge). Each inferred node takes
+    /// its id as its label and the [`ForceNode::new`] defaults; refine them via
+    /// the returned spec's `nodes` if needed.
+    ///
+    /// Handy when the caller only has connectivity and does not want to declare
+    /// a node up front for every id — the graph analogue of
+    /// [`crate::SankeySpec::from_flows`].
+    #[must_use]
+    pub fn from_edges(edges: Vec<ForceEdge>) -> Self {
+        let mut seen = AHashSet::new();
+        let mut nodes = Vec::new();
+        for edge in &edges {
+            for id in [&edge.source, &edge.target] {
+                if seen.insert(id.clone()) {
+                    nodes.push(ForceNode::new(id.clone(), id.clone()));
+                }
+            }
+        }
+        Self::new(nodes, edges)
+    }
+
     /// Override solver options.
     #[must_use]
     pub fn with_options(mut self, options: ForceOptions) -> Self {
@@ -230,6 +264,28 @@ impl ForceSpec {
         self.highlighted = ids.into_iter().map(Into::into).collect();
         self
     }
+
+    /// Run the solver and return the computed node/edge positions without
+    /// building a full chart. Validates first, so the same
+    /// [`ForceError`]s a chart build would raise surface here. The result is
+    /// deterministic for a given spec and `size`. Highlight state is a render
+    /// overlay and is not applied to this raw layout.
+    pub fn layout(&self, size: ChartSize) -> Result<ForceLayout, ForceError> {
+        validate(&self.nodes, &self.edges)?;
+        let plot = size.full_viewport().plot_area;
+        Ok(simulate(&self.nodes, &self.edges, &self.options, plot))
+    }
+
+    /// Compile this spec into a chart. Inherent-method alias for the
+    /// [`ChartSpec::build_chart`] trait method, so callers need not import the
+    /// trait.
+    pub fn try_build_chart(
+        &self,
+        workspace: Arc<Workspace>,
+        size: ChartSize,
+    ) -> Result<Chart, ForceError> {
+        <Self as ChartSpec>::build_chart(self, workspace, size)
+    }
 }
 
 impl ChartSpec for ForceSpec {
@@ -240,10 +296,8 @@ impl ChartSpec for ForceSpec {
         workspace: Arc<Workspace>,
         size: ChartSize,
     ) -> Result<Chart, Self::Error> {
-        validate(&self.nodes, &self.edges)?;
         let viewport = size.full_viewport();
-        let plot = viewport.plot_area;
-        let mut layout = simulate(&self.nodes, &self.edges, &self.options, plot);
+        let mut layout = self.layout(size)?;
 
         // Apply highlighted-node overlay state.
         if !self.highlighted.is_empty() {
@@ -327,7 +381,8 @@ impl ChartSpec for ForceSpec {
             .with_title_column("link"),
         ));
         scene.interactions.push(Interaction::SnapTargets(
-            SnapTargetSet::new(snap_targets(&layout, &self.edges)).with_name("force graph anchors"),
+            SnapTargetSet::new(snap_targets(&layout, &self.edges, &self.options))
+                .with_name("force graph anchors"),
         ));
 
         let mut chart = Chart::new(workspace, viewport);
@@ -421,7 +476,12 @@ fn validate(nodes: &[ForceNode], edges: &[ForceEdge]) -> Result<(), ForceError> 
     Ok(())
 }
 
-/// Iterative force-atlas2-style solver. v0 is O(n²) — no Barnes-Hut yet.
+/// Iterative force solver. Repulsion uses a Barnes-Hut quadtree above a small
+/// node count (see [`ForceOptions::use_barnes_hut`]); attraction, gravity, and
+/// alpha-cooled integration follow. Deterministic for a given input + options,
+/// and hardened against degenerate input: non-finite seed positions, radii, and
+/// weights are sanitised, and exactly-coincident seeds are nudged apart so they
+/// still repel.
 fn simulate(
     nodes: &[ForceNode],
     edges: &[ForceEdge],
@@ -438,17 +498,48 @@ fn simulate(
     let mut vy = vec![0.0_f32; n];
     let fixed: Vec<bool> = nodes.iter().map(|node| node.fixed).collect();
 
-    let radius = plot.w.min(plot.h) * 0.4;
+    // `.abs()` guards an inverted/degenerate plot rect (negative w/h).
+    let radius = plot.w.min(plot.h).abs() * 0.4;
     for (i, node) in nodes.iter().enumerate() {
-        if let Some([ix, iy]) = node.initial {
-            x[i] = ix;
-            y[i] = iy;
-        } else {
-            // deterministic pseudo-random init (golden-angle spiral).
-            let angle = i as f32 * 2.399_963_2; // golden angle in radians
-            let r = radius * ((i as f32 + 1.0) / n as f32).sqrt();
-            x[i] = cx + r * angle.cos();
-            y[i] = cy + r * angle.sin();
+        match node.initial {
+            // Honour a caller-supplied seed only when finite — a stray NaN/∞
+            // would otherwise poison every other node through repulsion.
+            Some([ix, iy]) if ix.is_finite() && iy.is_finite() => {
+                x[i] = ix;
+                y[i] = iy;
+            }
+            _ => {
+                // Deterministic golden-angle spiral — reproducible, never random.
+                let angle = i as f32 * GOLDEN_ANGLE;
+                let r = radius * ((i as f32 + 1.0) / n as f32).sqrt();
+                x[i] = cx + r * angle.cos();
+                y[i] = cy + r * angle.sin();
+            }
+        }
+    }
+
+    // Break exact position ties deterministically. A zero separation vector has
+    // an undefined repulsion direction, so coincident nodes would otherwise stay
+    // fused forever (this also covers a zero-size plot, where every spiral point
+    // collapses onto the centre). Fixed nodes keep their pin; only free
+    // duplicates are nudged, along a golden-angle direction keyed on index so
+    // the outcome stays reproducible.
+    let mut seen: AHashSet<(u32, u32)> = AHashSet::with_capacity(n);
+    for i in 0..n {
+        if seen.insert((x[i].to_bits(), y[i].to_bits())) || fixed[i] {
+            continue;
+        }
+        let mut bump = 1.0_f32;
+        loop {
+            let angle = (i as f32 + bump) * GOLDEN_ANGLE;
+            let nx = x[i] + angle.cos() * bump;
+            let ny = y[i] + angle.sin() * bump;
+            if seen.insert((nx.to_bits(), ny.to_bits())) {
+                x[i] = nx;
+                y[i] = ny;
+                break;
+            }
+            bump += 1.0;
         }
     }
 
@@ -464,7 +555,8 @@ fn simulate(
             (
                 id_to_index[e.source.as_str()],
                 id_to_index[e.target.as_str()],
-                e.weight,
+                // A non-finite weight would blow up the attraction term.
+                finite_or(e.weight, 0.0),
             )
         })
         .collect();
@@ -481,7 +573,7 @@ fn simulate(
             let tree = BHTree::build(&x, &y, tree_bounds);
             for i in 0..n {
                 let (rfx, rfy) =
-                    tree.apply_repulsion((x[i], y[i]), options.theta, options.repulsion);
+                    tree.apply_repulsion(i, (x[i], y[i]), options.theta, options.repulsion);
                 fx[i] += rfx;
                 fy[i] += rfy;
             }
@@ -555,9 +647,11 @@ fn simulate(
         .map(|(i, node)| ForceLayoutNode {
             id: node.id.clone(),
             label: node.label.clone(),
-            x: x[i],
-            y: y[i],
-            radius: node.radius,
+            // Defensive: keep geometry/picking/bounds free of NaN/∞ even if a
+            // pathological option (e.g. non-finite damping) diverged the solver.
+            x: finite_or(x[i], cx),
+            y: finite_or(y[i], cy),
+            radius: sanitize_radius(node.radius),
             color: node.color,
             highlighted: false,
         })
@@ -724,7 +818,7 @@ impl Mark for ForceNodeMark {
                 x: n.x,
                 y: n.y,
                 r: if n.highlighted {
-                    n.radius * 1.15
+                    n.radius * HIGHLIGHT_RADIUS_SCALE
                 } else {
                     n.radius
                 },
@@ -738,13 +832,21 @@ impl Mark for ForceNodeMark {
     }
 
     fn pick(&self, _ctx: &PickCtx<'_>, point: (f32, f32)) -> Option<PickHit> {
+        const PICK_SLOP: f32 = 2.0;
         let (px, py) = point;
         let mut best: Option<(usize, f32)> = None;
         for (row, n) in self.nodes.iter().enumerate() {
             let dx = px - n.x;
             let dy = py - n.y;
             let d = (dx * dx + dy * dy).sqrt();
-            if d <= n.radius + 2.0 && best.is_none_or(|(_, bd)| d < bd) {
+            // Match the rendered radius so highlighted (enlarged) nodes stay
+            // pickable across their whole glyph; nearest centre wins ties.
+            let render_r = if n.highlighted {
+                n.radius * HIGHLIGHT_RADIUS_SCALE
+            } else {
+                n.radius
+            };
+            if d <= render_r + PICK_SLOP && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }
@@ -811,12 +913,7 @@ impl ForceEdgeMark {
     /// Compute the perpendicular offset for this edge given its fan index +
     /// total siblings. Centred when count == 1, fans symmetrically otherwise.
     fn perpendicular_offset(&self, fan_index: u32, fan_count: u32) -> f32 {
-        if fan_count <= 1 {
-            return 0.0;
-        }
-        // -((n-1)/2), …, +((n-1)/2) scaled by fan_offset
-        let center = (fan_count as f32 - 1.0) * 0.5;
-        (fan_index as f32 - center) * self.fan_offset
+        fan_perp_offset(fan_index, fan_count, self.fan_offset)
     }
 }
 
@@ -887,7 +984,10 @@ impl Mark for ForceEdgeMark {
             } else {
                 segment_distance(e.source, e.target, [px, py])
             };
-            if d <= HIT_TOLERANCE && best.is_none_or(|(_, bd)| d < bd) {
+            // Widen the hit band by the stroke half-width so thick edges are
+            // pickable across their full rendered thickness, not just the axis.
+            let tol = HIT_TOLERANCE + self.edge_width(e.weight) * 0.5;
+            if d <= tol && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }
@@ -962,7 +1062,7 @@ fn quad_control_point(src: [f32; 2], tgt: [f32; 2], offset: f32) -> (f32, f32) {
 
 /// Self-loop: cubic Bézier out and back from the node, opens to the right.
 fn self_loop_path(e: &ForceLayoutEdge, fan_offset: f32, width: f32) -> PathPrim {
-    let radius = 18.0 + fan_offset * e.fan_index as f32;
+    let radius = self_loop_radius(fan_offset, e.fan_index);
     let p = e.source;
     let c1 = [p[0] + radius, p[1] - radius];
     let c2 = [p[0] + radius, p[1] + radius];
@@ -1007,7 +1107,7 @@ fn curve_distance(e: &ForceLayoutEdge, offset: f32, p: [f32; 2]) -> f32 {
 
 /// Distance to a self-loop, sampled.
 fn self_loop_distance(e: &ForceLayoutEdge, fan_offset: f32, p: [f32; 2]) -> f32 {
-    let radius = 18.0 + fan_offset * e.fan_index as f32;
+    let radius = self_loop_radius(fan_offset, e.fan_index);
     let origin = e.source;
     let c1 = [origin[0] + radius, origin[1] - radius];
     let c2 = [origin[0] + radius, origin[1] + radius];
@@ -1036,6 +1136,69 @@ fn self_loop_distance(e: &ForceLayoutEdge, fan_offset: f32, p: [f32; 2]) -> f32 
 }
 
 // ---------- helpers ----------
+
+/// Replace a non-finite value with `fallback`, so a stray NaN/∞ never escapes
+/// the solver into geometry, picking, or bounds.
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        fallback
+    }
+}
+
+/// Clamp a render radius to a finite, non-negative value.
+fn sanitize_radius(radius: f32) -> f32 {
+    if radius.is_finite() {
+        radius.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// Pixel radius of a self-loop for the `fan_index`-th sibling loop on a node.
+fn self_loop_radius(fan_offset: f32, fan_index: u32) -> f32 {
+    SELF_LOOP_BASE_RADIUS + fan_offset * fan_index as f32
+}
+
+/// Perpendicular fan offset for one edge among `fan_count` siblings. Centred
+/// when `fan_count <= 1`; fans symmetrically otherwise
+/// (`-((n-1)/2) … +((n-1)/2)` scaled by `fan_offset`).
+fn fan_perp_offset(fan_index: u32, fan_count: u32, fan_offset: f32) -> f32 {
+    if fan_count <= 1 {
+        return 0.0;
+    }
+    let center = (fan_count as f32 - 1.0) * 0.5;
+    (fan_index as f32 - center) * fan_offset
+}
+
+/// Anchor point that lies on the *rendered* edge — the curve or loop apex, not
+/// the straight chord — so annotation snapping lands on what the viewer sees.
+fn edge_anchor(edge: &ForceLayoutEdge, options: &ForceOptions) -> (f32, f32) {
+    if edge.self_loop {
+        // Apex of the cubic loop sits 0.75·r out along +x from the node.
+        let r = self_loop_radius(options.fan_offset, edge.fan_index);
+        return (edge.source[0] + 0.75 * r, edge.source[1]);
+    }
+    let mid_x = (edge.source[0] + edge.target[0]) * 0.5;
+    let mid_y = (edge.source[1] + edge.target[1]) * 0.5;
+    let straight = matches!(options.edge_style, EdgeStyle::Straight) && edge.fan_count <= 1;
+    let offset = if straight {
+        0.0
+    } else {
+        fan_perp_offset(edge.fan_index, edge.fan_count, options.fan_offset)
+    };
+    if offset == 0.0 {
+        return (mid_x, mid_y);
+    }
+    // Quadratic Bézier midpoint = chord midpoint + ½·offset·perp.
+    let dx = edge.target[0] - edge.source[0];
+    let dy = edge.target[1] - edge.source[1];
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let nx = -dy / len;
+    let ny = dx / len;
+    (mid_x + nx * offset * 0.5, mid_y + ny * offset * 0.5)
+}
 
 fn positions_bounds(x: &[f32], y: &[f32]) -> Rect {
     let mut min_x = f32::INFINITY;
@@ -1109,7 +1272,11 @@ fn build_labels(layout: &ForceLayout, max_visible: Option<usize>) -> Vec<LabelIt
         .collect()
 }
 
-fn snap_targets(layout: &ForceLayout, input_edges: &[ForceEdge]) -> Vec<SnapTarget> {
+fn snap_targets(
+    layout: &ForceLayout,
+    input_edges: &[ForceEdge],
+    options: &ForceOptions,
+) -> Vec<SnapTarget> {
     let mut targets = Vec::with_capacity(layout.nodes.len() + layout.edges.len());
     targets.extend(layout.nodes.iter().map(|node| {
         SnapTarget::new(node.x, node.y, SnapKind::Node)
@@ -1118,17 +1285,17 @@ fn snap_targets(layout: &ForceLayout, input_edges: &[ForceEdge]) -> Vec<SnapTarg
             .with_priority(if node.highlighted { 4 } else { 3 })
     }));
     targets.extend(layout.edges.iter().zip(input_edges).map(|(edge, input)| {
-        let (x, y) = if edge.self_loop {
-            (edge.source[0] + 24.0, edge.source[1])
+        // Anchor on the rendered curve/loop so fanned parallel edges get
+        // distinct, on-path snap points instead of stacking at one midpoint.
+        let (x, y) = edge_anchor(edge, options);
+        let label = if edge.self_loop {
+            format!("{} self-loop", input.source)
         } else {
-            (
-                (edge.source[0] + edge.target[0]) * 0.5,
-                (edge.source[1] + edge.target[1]) * 0.5,
-            )
+            format!("{} to {}", input.source, input.target)
         };
         SnapTarget::new(x, y, SnapKind::Edge)
             .with_radius((edge.weight.max(0.0).sqrt() + 5.0).clamp(5.0, 12.0))
-            .with_label(format!("{} to {}", input.source, input.target))
+            .with_label(label)
             .with_priority(1)
     }));
     targets
@@ -1264,13 +1431,31 @@ impl BHTree {
         self.nodes[node_idx].children[q] = new_idx as i32;
     }
 
-    fn apply_repulsion(&self, point: (f32, f32), theta: f32, k: f32) -> (f32, f32) {
+    /// Accumulate repulsion on the body at index `self_body` (position `point`).
+    /// Passing the index lets the walk skip that body exactly, rather than
+    /// skipping any body that happens to share its coordinates — which would
+    /// wrongly drop the force from a distinct, coincident neighbour.
+    fn apply_repulsion(
+        &self,
+        self_body: usize,
+        point: (f32, f32),
+        theta: f32,
+        k: f32,
+    ) -> (f32, f32) {
         let mut acc = (0.0_f32, 0.0_f32);
-        self.walk(0, point, theta, k, &mut acc);
+        self.walk(0, self_body, point, theta, k, &mut acc);
         acc
     }
 
-    fn walk(&self, node_idx: usize, point: (f32, f32), theta: f32, k: f32, acc: &mut (f32, f32)) {
+    fn walk(
+        &self,
+        node_idx: usize,
+        self_body: usize,
+        point: (f32, f32),
+        theta: f32,
+        k: f32,
+        acc: &mut (f32, f32),
+    ) {
         let node = self.nodes[node_idx];
         if node.mass <= 0.0 {
             return;
@@ -1284,14 +1469,9 @@ impl BHTree {
 
         // Far-enough or leaf with one body -> treat as point at COM.
         if !node.is_internal() || size / dist < theta {
-            // Skip self-force when this leaf IS the body in question (same position).
-            if node.body >= 0 {
-                let body = node.body as usize;
-                if (self.bx[body] - point.0).abs() < f32::EPSILON
-                    && (self.by[body] - point.1).abs() < f32::EPSILON
-                {
-                    return;
-                }
+            // Skip self-force when this leaf holds the querying body itself.
+            if node.body == self_body as i32 {
+                return;
             }
             let f = (k * node.mass) / dist_sq;
             acc.0 -= f * (dx / dist);
@@ -1301,7 +1481,7 @@ impl BHTree {
 
         for &child in &node.children {
             if child >= 0 {
-                self.walk(child as usize, point, theta, k, acc);
+                self.walk(child as usize, self_body, point, theta, k, acc);
             }
         }
     }
@@ -1571,5 +1751,232 @@ mod tests {
         );
         assert!((layout.nodes[0].x - 100.0).abs() < f32::EPSILON);
         assert!((layout.nodes[0].y - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn empty_graph_builds_without_panic() {
+        let chart = ForceSpec::new(Vec::new(), Vec::new())
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .expect("empty graph builds");
+        assert!(!chart.scene().layers.is_empty());
+        assert!(chart.snap_targets().is_empty());
+    }
+
+    #[test]
+    fn single_node_layout_is_finite() {
+        let layout = simulate(
+            &[ForceNode::new("solo", "Solo")],
+            &[],
+            &ForceOptions::default(),
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+        );
+        assert_eq!(layout.nodes.len(), 1);
+        assert!(layout.nodes[0].x.is_finite() && layout.nodes[0].y.is_finite());
+    }
+
+    #[test]
+    fn non_finite_seed_position_yields_finite_spread_layout() {
+        let mut poisoned = ForceNode::new("a", "A");
+        poisoned.initial = Some([f32::NAN, f32::INFINITY]);
+        let nodes = vec![poisoned, ForceNode::new("b", "B"), ForceNode::new("c", "C")];
+        let edges = vec![ForceEdge::new("a", "b"), ForceEdge::new("b", "c")];
+        let layout = simulate(
+            &nodes,
+            &edges,
+            &ForceOptions {
+                iterations: 60,
+                ..ForceOptions::default()
+            },
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+        );
+        for n in &layout.nodes {
+            assert!(
+                n.x.is_finite() && n.y.is_finite(),
+                "node {} non-finite: ({}, {})",
+                n.id,
+                n.x,
+                n.y
+            );
+        }
+        // If the seed guard were severed the NaN would propagate to every node,
+        // collapsing them all to the (sanitised) centre. The guard keeps the
+        // graph spread out.
+        let first = (layout.nodes[0].x, layout.nodes[0].y);
+        let all_same = layout
+            .nodes
+            .iter()
+            .all(|n| n.x == first.0 && n.y == first.1);
+        assert!(!all_same, "nodes collapsed — seed sanitisation missing");
+    }
+
+    #[test]
+    fn non_finite_radius_is_sanitized() {
+        let layout = simulate(
+            &[ForceNode::new("a", "A").with_radius(f32::NAN)],
+            &[],
+            &ForceOptions {
+                iterations: 1,
+                ..ForceOptions::default()
+            },
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        assert!(layout.nodes[0].radius.is_finite());
+        assert!(layout.nodes[0].radius >= 0.0);
+
+        let negative = simulate(
+            &[ForceNode::new("a", "A").with_radius(-4.0)],
+            &[],
+            &ForceOptions {
+                iterations: 1,
+                ..ForceOptions::default()
+            },
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        assert_eq!(negative.nodes[0].radius, 0.0);
+    }
+
+    #[test]
+    fn coincident_seed_positions_are_separated() {
+        let mut a = ForceNode::new("a", "A");
+        a.initial = Some([200.0, 150.0]);
+        let mut b = ForceNode::new("b", "B");
+        b.initial = Some([200.0, 150.0]);
+        let layout = simulate(
+            &[a, b],
+            &[],
+            &ForceOptions {
+                iterations: 60,
+                ..ForceOptions::default()
+            },
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+        );
+        let dx = layout.nodes[0].x - layout.nodes[1].x;
+        let dy = layout.nodes[0].y - layout.nodes[1].y;
+        assert!(
+            (dx * dx + dy * dy).sqrt() > 1.0,
+            "coincident nodes stayed fused"
+        );
+    }
+
+    #[test]
+    fn from_edges_infers_nodes_in_first_seen_order() {
+        let spec = ForceSpec::from_edges(vec![
+            ForceEdge::new("a", "b"),
+            ForceEdge::new("b", "c"),
+            ForceEdge::new("a", "c"),
+        ]);
+        let ids: Vec<&str> = spec.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+        assert_eq!(spec.nodes[0].label, "a");
+
+        let chart = spec
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .expect("inferred spec builds");
+        assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn layout_method_returns_finite_positions() {
+        let spec = ForceSpec::from_edges(vec![ForceEdge::new("a", "b"), ForceEdge::new("b", "c")])
+            .with_options(ForceOptions {
+                iterations: 30,
+                ..ForceOptions::default()
+            });
+        let layout = spec.layout(ChartSize::new(640, 480)).expect("layout");
+        assert_eq!(layout.nodes.len(), 3);
+        assert_eq!(layout.edges.len(), 2);
+        for n in &layout.nodes {
+            assert!(n.x.is_finite() && n.y.is_finite());
+        }
+    }
+
+    #[test]
+    fn layout_method_reports_validation_errors() {
+        let spec = ForceSpec::new(
+            vec![ForceNode::new("a", "A")],
+            vec![ForceEdge::new("a", "z")],
+        );
+        assert!(matches!(
+            spec.layout(ChartSize::new(400, 300)),
+            Err(ForceError::UnknownNode(_))
+        ));
+    }
+
+    #[test]
+    fn thick_edge_is_pickable_across_its_width() {
+        // Horizontal edge at y=150 from x=100..300, drawn at max thickness. A
+        // point 6px off the axis lies inside the stroke but outside the base
+        // 5px tolerance — only the width-aware tolerance catches it.
+        let spec = ForceSpec::new(
+            vec![
+                ForceNode::new("a", "A").pinned_at(100.0, 150.0),
+                ForceNode::new("b", "B").pinned_at(300.0, 150.0),
+            ],
+            vec![ForceEdge::new("a", "b").with_weight(8.0)],
+        )
+        .with_options(ForceOptions {
+            iterations: 1,
+            edge_style: EdgeStyle::Straight,
+            ..ForceOptions::default()
+        });
+        let chart = spec
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 300),
+            )
+            .expect("chart builds");
+        let hit = chart
+            .pick((200.0, 156.0))
+            .expect("thick edge should be hit 6px off its axis");
+        assert_eq!(hit.mark, EDGE_MARK);
+    }
+
+    #[test]
+    fn self_loop_snap_anchor_sits_on_loop_apex() {
+        let nodes = vec![ForceNode::new("a", "A").pinned_at(100.0, 100.0)];
+        let edges = vec![ForceEdge::new("a", "a")];
+        let options = ForceOptions::default();
+        let layout = simulate(&nodes, &edges, &options, Rect::new(0.0, 0.0, 400.0, 300.0));
+        let targets = snap_targets(&layout, &edges, &options);
+        let edge_target = targets
+            .iter()
+            .find(|t| t.kind == SnapKind::Edge)
+            .expect("edge snap target");
+        // apex = source.x + 0.75 * self_loop_radius(fan_offset, 0) = 100 + 0.75*18.
+        assert!(
+            (edge_target.x - 113.5).abs() < 1e-3,
+            "apex x = {}",
+            edge_target.x
+        );
+        assert!((edge_target.y - 100.0).abs() < 1e-3);
+        assert_eq!(edge_target.label.as_deref(), Some("a self-loop"));
+    }
+
+    #[test]
+    fn parallel_edge_snap_anchors_are_distinct() {
+        let nodes = vec![
+            ForceNode::new("a", "A").pinned_at(100.0, 100.0),
+            ForceNode::new("b", "B").pinned_at(300.0, 100.0),
+        ];
+        let edges = vec![ForceEdge::new("a", "b"), ForceEdge::new("a", "b")];
+        let options = ForceOptions::default();
+        let layout = simulate(&nodes, &edges, &options, Rect::new(0.0, 0.0, 400.0, 300.0));
+        let targets = snap_targets(&layout, &edges, &options);
+        let edge_targets: Vec<&SnapTarget> = targets
+            .iter()
+            .filter(|t| t.kind == SnapKind::Edge)
+            .collect();
+        assert_eq!(edge_targets.len(), 2);
+        // Fanned curves bow to opposite sides, so their on-path anchors differ
+        // instead of stacking at the shared chord midpoint.
+        let dx = (edge_targets[0].x - edge_targets[1].x).abs();
+        let dy = (edge_targets[0].y - edge_targets[1].y).abs();
+        assert!(dx + dy > 1.0, "anchors should separate, got ({dx}, {dy})");
     }
 }
