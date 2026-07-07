@@ -6,8 +6,9 @@
 //!
 //! ## Quick start
 //!
-//! ```rust,ignore
-//! use berthacharts_finance::*;
+//! ```
+//! use berthacharts_finance::{Candle, CandlestickSpec, Overlay};
+//! use berthacharts_finance::core::{ChartSize, Workspace};
 //!
 //! let candles = vec![
 //!     Candle::new(0, 100.0, 105.0, 99.0, 102.0),
@@ -16,7 +17,9 @@
 //! let chart = CandlestickSpec::new(candles)
 //!     .with_overlay(Overlay::Sma { window: 5, color: [1.0, 1.0, 0.0, 0.8] })
 //!     .with_overlay(Overlay::Bollinger { window: 20, k: 2.0, color: [0.6, 0.6, 0.9, 0.6] })
-//!     .build_chart(workspace, size)?;
+//!     .try_build_chart(Workspace::new(), ChartSize::new(800, 400))?;
+//! assert_eq!(chart.scene().layers.len(), 1);
+//! # Ok::<(), berthacharts_finance::CandlestickError>(())
 //! ```
 
 #![forbid(unsafe_code)]
