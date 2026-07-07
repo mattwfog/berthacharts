@@ -447,7 +447,7 @@ impl Mark for BeeswarmMark {
                 let dx = px - d.x;
                 let dy = py - d.y;
                 let dist = (dx * dx + dy * dy).sqrt();
-                if dist <= self.radius + 2.0 && best.map_or(true, |(_, bd)| dist < bd) {
+                if dist <= self.radius + 2.0 && best.is_none_or(|(_, bd)| dist < bd) {
                     best = Some((flat_row, dist));
                 }
                 flat_row += 1;

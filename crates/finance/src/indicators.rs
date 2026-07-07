@@ -36,10 +36,7 @@ pub fn exponential_moving_average(values: &[f32], window: usize) -> Vec<f32> {
     }
     let alpha = 2.0_f32 / (window as f32 + 1.0);
     // Seed with SMA at index window-1.
-    let mut sum = 0.0_f32;
-    for i in 0..window {
-        sum += values[i];
-    }
+    let sum: f32 = values[..window].iter().sum();
     let mut ema = sum / window as f32;
     out[window - 1] = ema;
     for i in window..n {
@@ -66,8 +63,8 @@ pub fn bollinger_bands(values: &[f32], window: usize, k: f32) -> BollingerBands 
             continue;
         }
         let mut var = 0.0_f64;
-        for j in i + 1 - window..=i {
-            let d = values[j] as f64 - mean as f64;
+        for value in &values[i + 1 - window..=i] {
+            let d = *value as f64 - mean as f64;
             var += d * d;
         }
         let stddev = (var / window as f64).sqrt() as f32;
@@ -199,10 +196,7 @@ pub fn atr(highs: &[f32], lows: &[f32], closes: &[f32], window: usize) -> Vec<f3
         tr[i] = h_l.max(h_pc).max(l_pc);
     }
     // First ATR = simple mean of first `window` TRs.
-    let mut sum = 0.0_f32;
-    for i in 0..window {
-        sum += tr[i];
-    }
+    let sum: f32 = tr[..window].iter().sum();
     let mut atr_val = sum / window as f32;
     out[window - 1] = atr_val;
     // Wilder's smoothing for the rest.
@@ -289,8 +283,8 @@ pub fn ichimoku(
     }
 
     let mut chikou = vec![f32::NAN; n];
-    for i in kijun..n {
-        chikou[i - kijun] = closes[i];
+    if kijun < n {
+        chikou[..n - kijun].copy_from_slice(&closes[kijun..n]);
     }
 
     Ichimoku {
@@ -402,18 +396,14 @@ fn midrange(highs: &[f32], lows: &[f32], window: usize) -> Vec<f32> {
     if window == 0 || window > n || lows.len() != n {
         return out;
     }
-    for i in window - 1..n {
-        let mut h = f32::NEG_INFINITY;
-        let mut l = f32::INFINITY;
-        for j in (i + 1 - window)..=i {
-            if highs[j] > h {
-                h = highs[j];
-            }
-            if lows[j] < l {
-                l = lows[j];
-            }
-        }
-        out[i] = (h + l) * 0.5;
+    for (i, out_val) in out.iter_mut().enumerate().skip(window - 1) {
+        let h = highs[i + 1 - window..=i]
+            .iter()
+            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v));
+        let l = lows[i + 1 - window..=i]
+            .iter()
+            .fold(f32::INFINITY, |acc, &v| acc.min(v));
+        *out_val = (h + l) * 0.5;
     }
     out
 }
@@ -444,8 +434,8 @@ mod tests {
     fn ema_tracks_then_smooths() {
         let v = vec![10.0_f32; 20];
         let e = exponential_moving_average(&v, 5);
-        for i in 4..20 {
-            assert!((e[i] - 10.0).abs() < 1e-5);
+        for value in &e[4..20] {
+            assert!((value - 10.0).abs() < 1e-5);
         }
     }
 
@@ -566,7 +556,7 @@ mod tests {
         let v: Vec<f32> = (1..=30).map(|i| i as f32).collect(); // all gains
         let r = rsi(&v, 14);
         for &x in &r[14..] {
-            assert!(x >= 0.0 && x <= 100.0);
+            assert!((0.0..=100.0).contains(&x));
         }
         // monotonic up should yield RSI near 100
         assert!(r[29] > 99.0);

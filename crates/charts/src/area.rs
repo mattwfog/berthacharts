@@ -347,9 +347,9 @@ fn compute_layout(
         StackMode::Normalized => {
             // Per-x totals
             let mut totals = vec![0.0_f32; n_x];
-            for xi in 0..n_x {
-                for si in 0..n_series {
-                    totals[xi] += grid[si][xi];
+            for row in grid.iter().take(n_series) {
+                for (xi, total) in totals.iter_mut().enumerate() {
+                    *total += row[xi];
                 }
             }
             let mut running = vec![0.0_f32; n_x];

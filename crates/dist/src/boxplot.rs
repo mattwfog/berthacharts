@@ -361,7 +361,7 @@ fn compute_layout(groups: &[BoxPlotGroup], options: &BoxPlotOptions, plot: Rect)
 
     let layout_groups: Vec<BoxPlotLayoutGroup> = groups
         .iter()
-        .zip(stats.into_iter())
+        .zip(stats)
         .enumerate()
         .map(|(i, (g, s))| {
             let center_x = inner.x + (i as f32 + 0.5) * slot;

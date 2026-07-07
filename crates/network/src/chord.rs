@@ -800,7 +800,7 @@ impl Mark for ChordRibbonMark {
             let mx = (p_s[0] + p_t[0]) * 0.5;
             let my = (p_s[1] + p_t[1]) * 0.5;
             let d = ((mx - px).powi(2) + (my - py).powi(2)).sqrt();
-            if d < 12.0 && best.map_or(true, |(_, bd)| d < bd) {
+            if d < 12.0 && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }

@@ -702,7 +702,7 @@ impl Mark for TreeNodeMark {
             let dx = px - n.x;
             let dy = py - n.y;
             let d = (dx * dx + dy * dy).sqrt();
-            if d <= n.radius + 2.0 && best.map_or(true, |(_, bd)| d < bd) {
+            if d <= n.radius + 2.0 && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }
@@ -784,7 +784,7 @@ impl Mark for TreeEdgeMark {
         let mut best: Option<(usize, f32)> = None;
         for (row, e) in self.edges.iter().enumerate() {
             let d = segment_distance(e.parent, e.child, [px, py]);
-            if d <= TOL && best.map_or(true, |(_, bd)| d < bd) {
+            if d <= TOL && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }

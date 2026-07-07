@@ -744,7 +744,7 @@ impl Mark for ForceNodeMark {
             let dx = px - n.x;
             let dy = py - n.y;
             let d = (dx * dx + dy * dy).sqrt();
-            if d <= n.radius + 2.0 && best.map_or(true, |(_, bd)| d < bd) {
+            if d <= n.radius + 2.0 && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }
@@ -887,7 +887,7 @@ impl Mark for ForceEdgeMark {
             } else {
                 segment_distance(e.source, e.target, [px, py])
             };
-            if d <= HIT_TOLERANCE && best.map_or(true, |(_, bd)| d < bd) {
+            if d <= HIT_TOLERANCE && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }

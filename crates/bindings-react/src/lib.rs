@@ -451,12 +451,14 @@ impl BarInput {
             .into_iter()
             .map(|d| BarDatum::new(d.label, d.value))
             .collect();
-        let mut opts = BarChartOptions::default();
-        opts.x_axis_label = self.x_label;
-        opts.y_axis_label = self.y_label;
-        opts.y_max = self.y_max;
-        opts.target = self.target;
-        opts.y_tick_count = self.y_ticks;
+        let opts = BarChartOptions {
+            x_axis_label: self.x_label,
+            y_axis_label: self.y_label,
+            y_max: self.y_max,
+            target: self.target,
+            y_tick_count: self.y_ticks,
+            ..BarChartOptions::default()
+        };
         BarChartSpec::new(data).with_options(opts)
     }
 }
@@ -500,13 +502,15 @@ impl LineInput {
                 datum
             })
             .collect();
-        let mut opts = LineChartOptions::default();
-        opts.x_axis_label = self.x_label;
-        opts.y_axis_label = self.y_label;
-        opts.x_tick_count = self.x_ticks;
-        opts.y_tick_count = self.y_ticks;
-        opts.line_width = self.line_width;
-        opts.show_points = self.show_points;
+        let opts = LineChartOptions {
+            x_axis_label: self.x_label,
+            y_axis_label: self.y_label,
+            x_tick_count: self.x_ticks,
+            y_tick_count: self.y_ticks,
+            line_width: self.line_width,
+            show_points: self.show_points,
+            ..LineChartOptions::default()
+        };
         LineChartSpec::new(data).with_options(opts)
     }
 }
@@ -691,11 +695,13 @@ impl ScatterInput {
                 datum
             })
             .collect();
-        let mut opts = ScatterPlotOptions::default();
-        opts.x_axis_label = self.x_label;
-        opts.y_axis_label = self.y_label;
-        opts.x_tick_count = self.x_ticks;
-        opts.y_tick_count = self.y_ticks;
+        let opts = ScatterPlotOptions {
+            x_axis_label: self.x_label,
+            y_axis_label: self.y_label,
+            x_tick_count: self.x_ticks,
+            y_tick_count: self.y_ticks,
+            ..ScatterPlotOptions::default()
+        };
         ScatterPlotSpec::new(data).with_options(opts)
     }
 }
@@ -734,12 +740,14 @@ impl HeatmapInput {
                 cell
             })
             .collect();
-        let mut opts = HeatmapOptions::default();
-        opts.signal_threshold = self.signal_threshold;
+        let mut opts = HeatmapOptions {
+            signal_threshold: self.signal_threshold,
+            max_visible_labels: self.max_visible_labels,
+            ..HeatmapOptions::default()
+        };
         if let Some(title) = self.legend_title {
             opts.legend_title = title;
         }
-        opts.max_visible_labels = self.max_visible_labels;
         HeatmapSpec::new(cells).with_options(opts)
     }
 }
