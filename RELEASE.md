@@ -1,8 +1,8 @@
 # Release Checklist
 
 Bertha Charts publishes the implemented crates first, then the user-facing
-facade. Crates marked `publish = false` are incubating crates and are not part
-of the initial public release.
+facade. The only crate marked `publish = false` is `berthacharts-bindings-react`,
+which ships to npm as `@berthacharts/react` instead of crates.io.
 
 ## Preflight
 
@@ -35,9 +35,12 @@ Publish crates in dependency order:
 4. `berthacharts-stats`
 5. `berthacharts-geo`
 6. `berthacharts-network`
-7. `berthacharts-renderer-wgpu`
-8. `berthacharts-leptos`
-9. `berthacharts`
+7. `berthacharts-anno`
+8. `berthacharts-dist`
+9. `berthacharts-finance`
+10. `berthacharts-renderer-wgpu`
+11. `berthacharts-leptos`
+12. `berthacharts`
 
 After each `cargo publish -p <crate-name>`, wait for crates.io indexing before
 packaging or publishing crates that depend on it.

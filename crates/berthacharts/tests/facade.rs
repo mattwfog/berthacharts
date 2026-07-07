@@ -1,6 +1,12 @@
 //! Downstream-style smoke tests for the facade crate.
 
-#[cfg(any(feature = "charts", feature = "network", feature = "geo"))]
+#[cfg(any(
+    feature = "charts",
+    feature = "network",
+    feature = "geo",
+    feature = "dist",
+    feature = "finance"
+))]
 use berthacharts::prelude::*;
 
 #[test]
@@ -65,6 +71,47 @@ fn root_exports_build_a_line_chart() {
     .build(berthacharts::ChartSize::new(480, 280))
     .expect("line chart should build");
 
+    assert!(!chart.scene().guides.is_empty());
+}
+
+#[cfg(feature = "charts")]
+#[test]
+fn prelude_builds_a_histogram() {
+    let samples: Vec<f32> = (0..200).map(|i| (i % 17) as f32 * 0.5).collect();
+    let chart = HistogramSpec::new(samples)
+        .build(ChartSize::new(640, 360))
+        .expect("histogram should build");
+
+    assert!(!chart.scene().layers.is_empty());
+    assert!(!chart.scene().guides.is_empty());
+}
+
+#[cfg(feature = "dist")]
+#[test]
+fn prelude_builds_a_boxplot() {
+    let chart = BoxPlotSpec::new(vec![
+        BoxPlotGroup::new("control", vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+        BoxPlotGroup::new("variant", vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0]),
+    ])
+    .build(ChartSize::new(640, 360))
+    .expect("boxplot should build");
+
+    assert!(!chart.scene().layers.is_empty());
+    assert!(!chart.scene().guides.is_empty());
+}
+
+#[cfg(feature = "finance")]
+#[test]
+fn prelude_builds_a_candlestick_chart() {
+    let chart = CandlestickSpec::new(vec![
+        Candle::new(1, 10.0, 12.0, 9.5, 11.0),
+        Candle::new(2, 11.0, 13.0, 10.5, 12.5),
+        Candle::new(3, 12.5, 12.8, 10.0, 10.4),
+    ])
+    .build(ChartSize::new(640, 360))
+    .expect("candlestick chart should build");
+
+    assert!(!chart.scene().layers.is_empty());
     assert!(!chart.scene().guides.is_empty());
 }
 

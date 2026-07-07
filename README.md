@@ -78,8 +78,8 @@ Advanced users can import the raw wasm-pack API from the `./wasm` export:
 import initWasm, { BerthaChart } from "@berthacharts/react/wasm";
 ```
 
-Default features include `charts` and `transforms`. Optional feature flags for
-the initial public release are `stats`, `geo`, `network`, `renderer-wgpu`, and
+Default features include `charts` and `transforms`. Optional feature flags are
+`stats`, `geo`, `network`, `dist`, `finance`, `anno`, `renderer-wgpu`, and
 `leptos`.
 
 Runnable examples:
@@ -110,18 +110,20 @@ let chart = BarChartSpec::new(vec![BarDatum::new("A", 1.0)])
   datasets, scene graph, mark/transform traits, lazy memoized transform DAG,
   picker, event system. No rendering, no framework bindings.
 - **Charts** (`berthacharts-charts`) — first-party mark implementations
-  (bar, line, scatter, heatmap) built on the core trait surface.
-- **Network** (`berthacharts-network`) — graph charts and layouts. Sankey
-  ships first; force-directed / chord / tree layouts later.
-- **Domain crates** (`transforms`, `stats`, `geo`, `network`) — opt-in domain
+  (bar, line, area, scatter, heatmap, sparkline, histogram) built on the core
+  trait surface.
+- **Network** (`berthacharts-network`) — graph charts and layouts: sankey,
+  force-directed, chord, tree, sunburst.
+- **Distribution** (`berthacharts-dist`) — boxplot, violin, beeswarm, ECDF.
+- **Finance** (`berthacharts-finance`) — candlestick/OHLC chart plus
+  indicators (MA, EMA, Bollinger, RSI, MACD, ATR, VWAP, Ichimoku, and more).
+- **Annotations** (`berthacharts-anno`) — reference lines, bands, arrows.
+- **Domain crates** (`transforms`, `stats`, `geo`) — opt-in domain
   logic built on the core trait surface.
 - **Renderer** (`renderer-wgpu`) — wgpu backend targeting WebGL2 on the web
   and native elsewhere.
 - **Bindings** — `berthacharts-leptos` provides Rust-native Leptos bindings.
   `@berthacharts/react` provides npm React components plus the raw WASM API.
-
-Incubating crates for annotations, distribution marks, and finance charts are
-kept private in this repository until they have usable public APIs.
 
 A working Leptos example wiring core → renderer → DOM lives under
 `examples/leptos-gallery/`.
@@ -145,7 +147,7 @@ cargo check --workspace
 cargo clippy --workspace --all-targets
 cargo test --workspace
 cargo test -p berthacharts
-cargo test -p berthacharts --features network,geo,stats
+cargo test -p berthacharts --features network,geo,stats,dist,finance,anno
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 scripts/build-npm.sh
 (cd crates/bindings-react/pkg && npm --cache /private/tmp/bertha-npm-cache pack --dry-run)
@@ -155,6 +157,7 @@ node scripts/check-npm-react.mjs crates/bindings-react/pkg
 `cargo package -p berthacharts` requires the leaf crates
 (`berthacharts-core`, `berthacharts-charts`, `berthacharts-transforms`,
 `berthacharts-stats`, `berthacharts-geo`, `berthacharts-network`,
+`berthacharts-anno`, `berthacharts-dist`, `berthacharts-finance`,
 `berthacharts-renderer-wgpu`, and `berthacharts-leptos`) to be published
 first, because Cargo resolves facade dependencies through the registry during
 package verification. See `RELEASE.md` for the publish order.

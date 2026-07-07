@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-publish = false
+readme.workspace = true
 
 [dependencies]
 berthacharts-core.workspace = true

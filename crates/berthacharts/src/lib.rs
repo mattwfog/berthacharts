@@ -17,9 +17,10 @@
 //! }
 //! ```
 //!
-//! Advanced users can still depend on the leaf crates directly. The initial
-//! public facade only exposes implemented crates; incubating crates stay out
-//! of the feature surface until they have usable APIs.
+//! Advanced users can still depend on the leaf crates directly. Every
+//! feature-gated crate in the facade is published; enable the features you
+//! need (`dist`, `finance`, `network`, `geo`, `stats`, `anno`,
+//! `renderer-wgpu`, `leptos`).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -68,7 +69,7 @@ pub mod anno {
     pub use berthacharts_anno::*;
 }
 
-/// Distribution marks — boxplot, ECDF.
+/// Distribution marks — boxplot, violin, beeswarm, ECDF.
 #[cfg(feature = "dist")]
 pub mod dist {
     pub use berthacharts_dist::*;
@@ -122,10 +123,11 @@ pub mod prelude {
     pub use crate::charts::{
         AreaChartError, AreaChartOptions, AreaChartSpec, AreaDatum, BarChartError, BarChartOptions,
         BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell, HeatmapError,
-        HeatmapOptions, HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions,
-        LineChartSpec, LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError,
-        ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary, SparklineDatum, SparklineError,
-        SparklineOptions, SparklineSpec, StackMode,
+        HeatmapOptions, HeatmapSpec, HeatmapSummary, HistogramBin, HistogramError,
+        HistogramOptions, HistogramSpec, LineChartError, LineChartOptions, LineChartSpec,
+        LineChartSummary, LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions,
+        ScatterPlotSpec, ScatterPlotSummary, SparklineDatum, SparklineError, SparklineOptions,
+        SparklineSpec, StackMode,
     };
 
     #[cfg(feature = "transforms")]
@@ -153,8 +155,9 @@ pub mod prelude {
 
     #[cfg(feature = "dist")]
     pub use crate::dist::{
-        BoxPlotError, BoxPlotGroup, BoxPlotOptions, BoxPlotSpec, BoxPlotStats, EcdfError,
-        EcdfOptions, EcdfSeries, EcdfSpec,
+        BeeswarmError, BeeswarmGroup, BeeswarmOptions, BeeswarmSpec, BoxPlotError, BoxPlotGroup,
+        BoxPlotOptions, BoxPlotSpec, BoxPlotStats, EcdfError, EcdfOptions, EcdfSeries, EcdfSpec,
+        ViolinError, ViolinGroup, ViolinOptions, ViolinSpec,
     };
 
     #[cfg(feature = "finance")]
@@ -175,9 +178,10 @@ pub mod prelude {
 pub use berthacharts_charts::{
     AreaChartError, AreaChartOptions, AreaChartSpec, AreaDatum, BarChartError, BarChartOptions,
     BarChartSpec, BarChartSummary, BarDatum, DotMode, HeatmapCell, HeatmapError, HeatmapOptions,
-    HeatmapSpec, HeatmapSummary, LineChartError, LineChartOptions, LineChartSpec, LineChartSummary,
-    LineDatum, ScatterDatum, ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec,
-    ScatterPlotSummary, SparklineDatum, SparklineError, SparklineOptions, SparklineSpec, StackMode,
+    HeatmapSpec, HeatmapSummary, HistogramBin, HistogramError, HistogramOptions, HistogramSpec,
+    LineChartError, LineChartOptions, LineChartSpec, LineChartSummary, LineDatum, ScatterDatum,
+    ScatterPlotError, ScatterPlotOptions, ScatterPlotSpec, ScatterPlotSummary, SparklineDatum,
+    SparklineError, SparklineOptions, SparklineSpec, StackMode,
 };
 pub use berthacharts_core::{
     Chart, ChartError, ChartSize, ChartSpec, Dataset, DatasetId, Guide, Mark, Rect, Scene,
