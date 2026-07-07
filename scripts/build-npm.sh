@@ -39,6 +39,11 @@ const fs = require("node:fs");
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 pkg.name = "@berthacharts/react";
+// The npm package can version independently of the Rust crates: packaging
+// fixes ship as new npm versions without republishing 12 immutable crates.
+if (process.env.NPM_PKG_VERSION) {
+  pkg.version = process.env.NPM_PKG_VERSION;
+}
 pkg.description = "React components and WASM bindings for Bertha Charts.";
 pkg.main = "react.js";
 pkg.module = "react.js";
