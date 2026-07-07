@@ -1,8 +1,41 @@
-//! Tree / dendogram layout.
+//! Tree / dendrogram layout.
 //!
 //! Hierarchical layout for parent-child trees. Simplified Reingold-Tilford:
-//! depth determines axis, sibling order + subtree width determines the other.
-//! Supports top-down / bottom-up / left-to-right / right-to-left orientations.
+//! depth determines one axis, sibling order + subtree width determines the
+//! other. Supports top-down / bottom-up / left-to-right / right-to-left
+//! orientations.
+//!
+//! Structure is taken from [`TreeNode::parent`]; explicit [`TreeEdge`]s are
+//! optional and only carry per-edge styling. The layout is defensive about
+//! degenerate input:
+//!
+//! - A single node renders centered; a chain renders as a straight spine.
+//! - Very deep and very wide trees are laid out iteratively, so pathological
+//!   depth cannot overflow the call stack.
+//! - Non-finite radii, colors, and padding are sanitized before they reach the
+//!   renderer or the hit-tester.
+//! - Multiple roots are rejected as [`TreeError::MultipleRoots`] unless
+//!   [`TreeOptions::allow_forest`] opts into forest layout, and cycles /
+//!   orphaned components are rejected as [`TreeError::Cycle`].
+//!
+//! ```
+//! use berthacharts_network::tree::{TreeNode, TreeOptions, TreeOrientation, TreeSpec};
+//! use berthacharts_network::core::ChartSize;
+//!
+//! let spec = TreeSpec::new(
+//!     vec![
+//!         TreeNode::root("root", "Root"),
+//!         TreeNode::child("a", "A", "root"),
+//!         TreeNode::child("b", "B", "root"),
+//!     ],
+//!     vec![],
+//! )
+//! .with_options(TreeOptions::default().with_orientation(TreeOrientation::LeftRight));
+//!
+//! let layout = spec.layout(ChartSize::new(400, 300)).expect("valid tree");
+//! assert_eq!(layout.nodes.len(), 3);
+//! assert_eq!(layout.edges.len(), 2);
+//! ```
 
 use std::fmt;
 use std::sync::Arc;
@@ -126,14 +159,22 @@ pub enum TreeOrientation {
 pub struct TreeOptions {
     /// Tree orientation.
     pub orientation: TreeOrientation,
-    /// Margin from the plot edges (pixels).
+    /// Margin from the plot edges (pixels). Non-finite or negative values are
+    /// treated as `0.0` during layout.
     pub padding: f32,
     /// Render node labels.
     pub show_labels: bool,
-    /// Per-label cap.
+    /// Per-label cap. `None` lets the overlay attempt every label.
     pub max_visible_labels: Option<usize>,
-    /// Width of the line connecting parent to child.
+    /// Width of the line connecting parent to child (pixels).
     pub edge_width: f32,
+    /// Lay out a forest (more than one root) instead of rejecting it.
+    ///
+    /// When `false` (the default) a second root is a
+    /// [`TreeError::MultipleRoots`]. When `true` each root's subtree is packed
+    /// into its own contiguous band of leaf slots, so roots render side by side
+    /// without overlap.
+    pub allow_forest: bool,
 }
 
 impl Default for TreeOptions {
@@ -144,7 +185,53 @@ impl Default for TreeOptions {
             show_labels: true,
             max_visible_labels: None,
             edge_width: 1.2,
+            allow_forest: false,
         }
+    }
+}
+
+impl TreeOptions {
+    /// Set the tree orientation.
+    #[must_use]
+    pub const fn with_orientation(mut self, orientation: TreeOrientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Set the edge-inset padding in pixels.
+    #[must_use]
+    pub const fn with_padding(mut self, padding: f32) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// Toggle node labels on or off.
+    #[must_use]
+    pub const fn with_show_labels(mut self, show_labels: bool) -> Self {
+        self.show_labels = show_labels;
+        self
+    }
+
+    /// Cap the number of node labels the overlay may place.
+    #[must_use]
+    pub const fn with_max_visible_labels(mut self, max_visible_labels: usize) -> Self {
+        self.max_visible_labels = Some(max_visible_labels);
+        self
+    }
+
+    /// Set the parent→child connector width in pixels.
+    #[must_use]
+    pub const fn with_edge_width(mut self, edge_width: f32) -> Self {
+        self.edge_width = edge_width;
+        self
+    }
+
+    /// Lay out multiple roots as a forest instead of returning
+    /// [`TreeError::MultipleRoots`].
+    #[must_use]
+    pub const fn with_allow_forest(mut self, allow_forest: bool) -> Self {
+        self.allow_forest = allow_forest;
+        self
     }
 }
 
@@ -173,6 +260,35 @@ impl TreeSpec {
     pub const fn with_options(mut self, options: TreeOptions) -> Self {
         self.options = options;
         self
+    }
+
+    /// Compute the reusable node/edge layout for `size` without building a
+    /// full [`Chart`]. Handy for tests, hit-testing harnesses, or callers that
+    /// drive their own renderer.
+    ///
+    /// # Errors
+    /// Returns a [`TreeError`] when the input is not a valid tree — or forest,
+    /// when [`TreeOptions::allow_forest`] is set.
+    pub fn layout(&self, size: ChartSize) -> Result<TreeLayout, TreeError> {
+        compute_layout(
+            &self.nodes,
+            &self.edges,
+            &self.options,
+            size.full_viewport().plot_area,
+        )
+    }
+
+    /// Compile this spec into a chart without importing the [`ChartSpec`]
+    /// trait at the call site.
+    ///
+    /// # Errors
+    /// Propagates any [`TreeError`] raised while computing the layout.
+    pub fn try_build_chart(
+        &self,
+        workspace: Arc<Workspace>,
+        size: ChartSize,
+    ) -> Result<Chart, TreeError> {
+        <Self as ChartSpec>::build_chart(self, workspace, size)
     }
 }
 
@@ -274,7 +390,7 @@ impl ChartSpec for TreeSpec {
         workspace.upsert_scale(X_SCALE, x_scale);
         workspace.upsert_scale(Y_SCALE, y_scale);
         workspace.upsert_coord(COORD, Arc::new(CartesianCoord::new(X_SCALE, Y_SCALE)));
-        workspace.upsert_dataset(node_dataset(&layout));
+        workspace.upsert_dataset(node_dataset(&layout, &self.nodes));
         workspace.upsert_dataset(edge_dataset(&layout, &self.nodes));
 
         let edge_mark: Arc<dyn Mark> = Arc::new(TreeEdgeMark::new(
@@ -316,9 +432,8 @@ impl ChartSpec for TreeSpec {
                 vec![
                     TooltipField::new("Id", "id").as_label(),
                     TooltipField::new("Depth", "depth").as_integer(),
-                    TooltipField::new("Radius", "radius"),
-                    TooltipField::new("X", "x"),
-                    TooltipField::new("Y", "y"),
+                    TooltipField::new("Children", "children").as_integer(),
+                    TooltipField::new("Radius", "radius").as_number(1),
                 ],
             )
             .with_title_column("label"),
@@ -381,19 +496,23 @@ fn compute_layout(
         }
     }
     if roots.is_empty() {
+        // Zero nodes, or every node has a parent (a pure cycle).
         return Err(TreeError::NoRoot);
     }
-    if roots.len() > 1 {
+    if roots.len() > 1 && !options.allow_forest {
         let names: Vec<String> = roots.iter().map(|&i| nodes[i].id.clone()).collect();
         return Err(TreeError::MultipleRoots(names));
     }
-    let root = roots[0];
 
-    // Cycle check via DFS.
+    // Depth + reachability via an iterative DFS seeded from every root. Using an
+    // explicit heap stack (not recursion) keeps pathologically deep trees from
+    // overflowing the call stack. Since every non-root node has exactly one
+    // parent, a node reached twice signals a cycle.
     let mut depth = vec![u32::MAX; n];
     let mut order = Vec::with_capacity(n);
     {
-        let mut stack: Vec<(usize, u32)> = vec![(root, 0)];
+        // Seed reversed so the first root pops (and lays out) first.
+        let mut stack: Vec<(usize, u32)> = roots.iter().rev().map(|&r| (r, 0)).collect();
         while let Some((i, d)) = stack.pop() {
             if depth[i] != u32::MAX {
                 return Err(TreeError::Cycle(nodes[i].id.clone()));
@@ -406,40 +525,60 @@ fn compute_layout(
         }
     }
     if order.len() != n {
-        // Some node not reached from root — disconnected
-        return Err(TreeError::Cycle("(disconnected nodes)".to_string()));
+        // A node no root can reach sits on a parent cycle or in a disconnected
+        // component. Report the first such node so the error is actionable.
+        let orphan = nodes
+            .iter()
+            .enumerate()
+            .find(|(i, _)| depth[*i] == u32::MAX)
+            .map(|(_, node)| node.id.clone())
+            .unwrap_or_else(|| "(unreachable)".to_string());
+        return Err(TreeError::Cycle(orphan));
     }
 
-    // Simple "subtree-width" layout: leaf nodes get equal slots; internal nodes
-    // anchor at the midpoint of their children's slots.
+    // "Subtree-width" layout: leaves take equal, contiguous slots in left-to-
+    // right DFS order; each internal node centers over its first and last child.
+    // Evaluated as an iterative post-order (explicit stack of `(node, next
+    // child cursor)` frames) so depth cannot overflow the call stack. Roots are
+    // visited in order, so each root's subtree owns a contiguous slot band and
+    // forests never overlap.
     let mut leaf_index = 0_usize;
     let mut x_slot = vec![0.0_f32; n];
-
-    // Post-order traversal: iterative
-    fn assign_slots(
-        node: usize,
-        children: &[Vec<usize>],
-        x_slot: &mut [f32],
-        leaf_index: &mut usize,
-    ) {
-        let kids = &children[node];
-        if kids.is_empty() {
-            x_slot[node] = *leaf_index as f32;
-            *leaf_index += 1;
-            return;
+    {
+        let mut stack: Vec<(usize, usize)> = Vec::new();
+        for &root in &roots {
+            stack.push((root, 0));
+            while let Some((node, child_cursor)) = stack.last().copied() {
+                if child_cursor < children[node].len() {
+                    let child = children[node][child_cursor];
+                    if let Some(top) = stack.last_mut() {
+                        top.1 += 1;
+                    }
+                    stack.push((child, 0));
+                } else {
+                    let kids = &children[node];
+                    if kids.is_empty() {
+                        x_slot[node] = leaf_index as f32;
+                        leaf_index += 1;
+                    } else {
+                        let lo = x_slot[kids[0]];
+                        let hi = x_slot[*kids.last().unwrap()];
+                        x_slot[node] = (lo + hi) * 0.5;
+                    }
+                    stack.pop();
+                }
+            }
         }
-        for &k in kids {
-            assign_slots(k, children, x_slot, leaf_index);
-        }
-        let lo = x_slot[kids[0]];
-        let hi = x_slot[*kids.last().unwrap()];
-        x_slot[node] = (lo + hi) * 0.5;
     }
-    assign_slots(root, &children, &mut x_slot, &mut leaf_index);
 
     let max_depth = depth.iter().copied().max().unwrap_or(0);
     let total_slots = leaf_index.max(1) as f32;
-    let pad = options.padding;
+    // A non-finite or negative padding would poison every node coordinate.
+    let pad = if options.padding.is_finite() {
+        options.padding.max(0.0)
+    } else {
+        0.0
+    };
     let plot_w = (plot.w - 2.0 * pad).max(1.0);
     let plot_h = (plot.h - 2.0 * pad).max(1.0);
 
@@ -478,8 +617,8 @@ fn compute_layout(
             label: node.label.clone(),
             x,
             y,
-            radius: node.radius,
-            color: node.color,
+            radius: sanitize_radius(node.radius),
+            color: sanitize_color(node.color),
             depth: depth[i],
         });
     }
@@ -493,10 +632,12 @@ fn compute_layout(
     for (ci, node) in nodes.iter().enumerate() {
         if let Some(parent_id) = &node.parent {
             let pi = id_to_index[parent_id];
-            let color = edge_lookup
-                .get(&(parent_id.clone(), node.id.clone()))
-                .copied()
-                .unwrap_or([0.55, 0.55, 0.60, 0.7]);
+            let color = sanitize_color(
+                edge_lookup
+                    .get(&(parent_id.clone(), node.id.clone()))
+                    .copied()
+                    .unwrap_or([0.55, 0.55, 0.60, 0.7]),
+            );
             layout_edges.push(TreeLayoutEdge {
                 parent: [layout_nodes[pi].x, layout_nodes[pi].y],
                 child: [layout_nodes[ci].x, layout_nodes[ci].y],
@@ -532,21 +673,38 @@ fn build_labels(
                 TreeOrientation::LeftRight => (n.x + n.radius + 8.0, n.y, LabelAnchor::Right),
                 TreeOrientation::RightLeft => (n.x - n.radius - 8.0, n.y, LabelAnchor::Left),
             };
+            // Root labels anchor the whole diagram; never let the overlay drop
+            // one to place a leaf label instead.
+            let priority = if n.depth == 0 {
+                LabelPriority::Required
+            } else {
+                LabelPriority::Important
+            };
             LabelItem::new(x, y, n.label.clone())
                 .with_anchor(anchor)
                 .with_kind(LabelKind::Node)
-                .with_priority(LabelPriority::Important)
+                .with_priority(priority)
         })
         .collect()
 }
 
-fn node_dataset(layout: &TreeLayout) -> Dataset {
+fn node_dataset(layout: &TreeLayout, input_nodes: &[TreeNode]) -> Dataset {
+    // Fan-out per node, keyed by parent id, so tooltips can surface how many
+    // direct children each node has (0 == leaf).
+    let mut child_counts: AHashMap<&str, i64> = AHashMap::new();
+    for node in input_nodes {
+        if let Some(parent) = &node.parent {
+            *child_counts.entry(parent.as_str()).or_insert(0) += 1;
+        }
+    }
+
     let mut id_col: Vec<Arc<str>> = Vec::with_capacity(layout.nodes.len());
     let mut label_col: Vec<Arc<str>> = Vec::with_capacity(layout.nodes.len());
     let mut x_col = Vec::with_capacity(layout.nodes.len());
     let mut y_col = Vec::with_capacity(layout.nodes.len());
     let mut depth_col = Vec::with_capacity(layout.nodes.len());
     let mut radius_col = Vec::with_capacity(layout.nodes.len());
+    let mut children_col = Vec::with_capacity(layout.nodes.len());
     for n in &layout.nodes {
         id_col.push(Arc::from(n.id.as_str()));
         label_col.push(Arc::from(n.label.as_str()));
@@ -554,6 +712,7 @@ fn node_dataset(layout: &TreeLayout) -> Dataset {
         y_col.push(n.y);
         depth_col.push(n.depth as i64);
         radius_col.push(n.radius);
+        children_col.push(child_counts.get(n.id.as_str()).copied().unwrap_or(0));
     }
     Dataset::new(
         NODE_DATASET,
@@ -570,6 +729,10 @@ fn node_dataset(layout: &TreeLayout) -> Dataset {
             (
                 "radius".to_string(),
                 Column::F32(ColumnData::new(radius_col)),
+            ),
+            (
+                "children".to_string(),
+                Column::I64(ColumnData::new(children_col)),
             ),
         ],
     )
@@ -745,6 +908,12 @@ struct TreeEdgeMark {
 
 impl TreeEdgeMark {
     fn new(id: MarkId, edges: Vec<TreeLayoutEdge>, width: f32) -> Self {
+        // A non-finite width would poison both the stroke and the fingerprint.
+        let width = if width.is_finite() {
+            width.max(0.0)
+        } else {
+            1.0
+        };
         Self { id, edges, width }
     }
 }
@@ -779,12 +948,12 @@ impl Mark for TreeEdgeMark {
     }
 
     fn pick(&self, _ctx: &PickCtx<'_>, point: (f32, f32)) -> Option<PickHit> {
-        const TOL: f32 = 4.0;
+        let tol = edge_pick_tolerance(self.width);
         let (px, py) = point;
         let mut best: Option<(usize, f32)> = None;
         for (row, e) in self.edges.iter().enumerate() {
             let d = segment_distance(e.parent, e.child, [px, py]);
-            if d <= TOL && best.is_none_or(|(_, bd)| d < bd) {
+            if d <= tol && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }
         }
@@ -816,6 +985,47 @@ impl Mark for TreeEdgeMark {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+/// Clamp a user-supplied radius to a finite, non-negative pixel value.
+///
+/// A non-finite radius would poison bounds computation and the snap-radius
+/// clamp; collapsing it to `0.0` keeps the node pickable (within slack) while
+/// staying safe.
+fn sanitize_radius(radius: f32) -> f32 {
+    if radius.is_finite() {
+        radius.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// Clamp each channel of a premultiplied RGBA color into `0.0..=1.0`.
+///
+/// Non-finite channels collapse to `0.0` so a stray `NaN`/`inf` cannot poison
+/// the renderer's blend math or a downstream fingerprint.
+fn sanitize_color(color: [f32; 4]) -> [f32; 4] {
+    let mut out = [0.0; 4];
+    for (slot, channel) in out.iter_mut().zip(color) {
+        *slot = if channel.is_finite() {
+            channel.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+    }
+    out
+}
+
+/// Hit-test tolerance for an edge of the given stroke width. Half the stroke
+/// straddles the centerline, plus a few pixels of Fitts's-law slack so hairline
+/// connectors stay clickable.
+fn edge_pick_tolerance(width: f32) -> f32 {
+    let half = if width.is_finite() {
+        (width * 0.5).max(0.0)
+    } else {
+        0.0
+    };
+    half + 3.0
 }
 
 fn segment_distance(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
@@ -988,5 +1198,217 @@ mod tests {
             .build_chart(workspace, ChartSize::new(400, 400))
             .expect("chart");
         assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn handles_single_node() {
+        let nodes = vec![TreeNode::root("solo", "Solo")];
+        let layout = compute_layout(
+            &nodes,
+            &[],
+            &TreeOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        )
+        .expect("single-node layout");
+        assert_eq!(layout.nodes.len(), 1);
+        assert_eq!(layout.nodes[0].depth, 0);
+        assert!(layout.edges.is_empty());
+        assert!(layout.nodes[0].x.is_finite() && layout.nodes[0].y.is_finite());
+
+        let chart = TreeSpec::new(nodes, vec![])
+            .try_build_chart(
+                berthacharts_core::Workspace::new(),
+                ChartSize::new(400, 400),
+            )
+            .expect("single-node chart");
+        assert!(!chart.scene().layers.is_empty());
+    }
+
+    #[test]
+    fn empty_input_is_rejected() {
+        let result = compute_layout(
+            &[],
+            &[],
+            &TreeOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        );
+        assert!(matches!(result, Err(TreeError::NoRoot)));
+    }
+
+    #[test]
+    fn deep_chain_lays_out_iteratively() {
+        // A chain this deep overflows the call stack under recursive slot
+        // assignment on a default 2 MiB test-thread stack; the iterative
+        // post-order walk handles it in O(n) heap space.
+        const DEPTH: usize = 40_000;
+        let mut nodes = Vec::with_capacity(DEPTH);
+        nodes.push(TreeNode::root("n0", "n0"));
+        for i in 1..DEPTH {
+            nodes.push(TreeNode::child(
+                format!("n{i}"),
+                format!("n{i}"),
+                format!("n{}", i - 1),
+            ));
+        }
+        let layout = compute_layout(
+            &nodes,
+            &[],
+            &TreeOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        )
+        .expect("deep chain layout");
+        assert_eq!(layout.nodes.len(), DEPTH);
+        assert_eq!(layout.nodes[DEPTH - 1].depth as usize, DEPTH - 1);
+        // A single-leaf chain collapses onto one vertical slot.
+        let x0 = layout.nodes[0].x;
+        assert!((layout.nodes[DEPTH - 1].x - x0).abs() < 0.001);
+    }
+
+    #[test]
+    fn forest_layout_is_opt_in() {
+        let nodes = vec![
+            TreeNode::root("a", "A"),
+            TreeNode::child("a1", "A1", "a"),
+            TreeNode::root("b", "B"),
+            TreeNode::child("b1", "B1", "b"),
+        ];
+
+        // Default: a second root is an error.
+        let rejected = compute_layout(
+            &nodes,
+            &[],
+            &TreeOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        );
+        assert!(matches!(rejected, Err(TreeError::MultipleRoots(_))));
+
+        // Opt in: both roots lay out side by side without overlap.
+        let options = TreeOptions::default().with_allow_forest(true);
+        let layout = compute_layout(&nodes, &[], &options, Rect::new(0.0, 0.0, 400.0, 400.0))
+            .expect("forest layout");
+        assert_eq!(layout.nodes.len(), 4);
+        assert_eq!(layout.nodes[0].depth, 0); // root a
+        assert_eq!(layout.nodes[2].depth, 0); // root b
+        assert_eq!(layout.edges.len(), 2);
+        // The first root's slot band sits left of the second root's band.
+        assert!(layout.nodes[0].x < layout.nodes[2].x);
+    }
+
+    #[test]
+    fn rejects_disconnected_cycle_component() {
+        // `r` is the only root; `a`/`b` form a parent cycle unreachable from it.
+        let nodes = vec![
+            TreeNode::root("r", "Root"),
+            TreeNode::child("a", "A", "b"),
+            TreeNode::child("b", "B", "a"),
+        ];
+        let result = compute_layout(
+            &nodes,
+            &[],
+            &TreeOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        );
+        assert!(matches!(result, Err(TreeError::Cycle(_))));
+    }
+
+    #[test]
+    fn sanitizes_non_finite_radius_and_color() {
+        let nodes = vec![
+            TreeNode::root("r", "Root").with_radius(f32::NAN),
+            TreeNode::child("c", "C", "r")
+                .with_radius(f32::INFINITY)
+                .with_color([f32::NAN, 0.5, -3.0, 2.0]),
+        ];
+        let layout = compute_layout(
+            &nodes,
+            &[],
+            &TreeOptions::default(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        )
+        .expect("layout");
+
+        // Non-finite radii collapse to a finite, non-negative value.
+        assert_eq!(layout.nodes[0].radius, 0.0);
+        assert_eq!(layout.nodes[1].radius, 0.0);
+        // Color channels clamp into range; NaN → 0, out-of-range → clamped.
+        assert_eq!(layout.nodes[1].color, [0.0, 0.5, 0.0, 1.0]);
+        for node in &layout.nodes {
+            assert!(node.radius.is_finite());
+            assert!(node.color.iter().all(|c| (0.0..=1.0).contains(c)));
+        }
+        for edge in &layout.edges {
+            assert!(edge.color.iter().all(|c| c.is_finite()));
+        }
+    }
+
+    #[test]
+    fn non_finite_padding_keeps_coords_finite() {
+        let nodes = vec![
+            TreeNode::root("r", "Root"),
+            TreeNode::child("a", "A", "r"),
+            TreeNode::child("b", "B", "r"),
+        ];
+        let options = TreeOptions::default().with_padding(f32::NAN);
+        let layout = compute_layout(&nodes, &[], &options, Rect::new(0.0, 0.0, 400.0, 400.0))
+            .expect("layout");
+        for node in &layout.nodes {
+            assert!(node.x.is_finite(), "x must be finite, got {}", node.x);
+            assert!(node.y.is_finite(), "y must be finite, got {}", node.y);
+        }
+    }
+
+    #[test]
+    fn edge_pick_tolerance_scales_with_stroke_width() {
+        let nodes = vec![TreeNode::root("r", "Root"), TreeNode::child("c", "C", "r")];
+        let size = ChartSize::new(400, 300);
+
+        let thick = TreeSpec::new(nodes.clone(), vec![])
+            .with_options(TreeOptions::default().with_edge_width(10.0));
+        let layout = thick.layout(size).expect("layout");
+        // Single child => root and child share x; the connector is vertical.
+        let x = layout.nodes[0].x;
+        let mid_y = (layout.nodes[0].y + layout.nodes[1].y) * 0.5;
+        let probe = (x + 6.0, mid_y); // 6 px off the centerline, far from both nodes
+
+        let thick_chart = thick
+            .try_build_chart(berthacharts_core::Workspace::new(), size)
+            .expect("chart");
+        let hit = thick_chart
+            .pick(probe)
+            .expect("a 10 px connector should be hit 6 px off-center");
+        assert_eq!(hit.mark, EDGE_MARK);
+
+        // The identical probe misses a hairline connector (tol ~3.6 px < 6 px).
+        let thin =
+            TreeSpec::new(nodes, vec![]).with_options(TreeOptions::default().with_edge_width(1.2));
+        let thin_chart = thin
+            .try_build_chart(berthacharts_core::Workspace::new(), size)
+            .expect("chart");
+        assert!(
+            thin_chart.pick(probe).is_none(),
+            "a hairline connector should miss 6 px off-center"
+        );
+    }
+
+    #[test]
+    fn node_dataset_reports_child_counts() {
+        let nodes = vec![
+            TreeNode::root("r", "Root"),
+            TreeNode::child("a", "A", "r"),
+            TreeNode::child("b", "B", "r"),
+            TreeNode::child("a1", "A1", "a"),
+        ];
+        let workspace = berthacharts_core::Workspace::new();
+        TreeSpec::new(nodes, vec![])
+            .try_build_chart(workspace.clone(), ChartSize::new(400, 400))
+            .expect("chart");
+
+        let dataset = workspace.dataset(NODE_DATASET).expect("node dataset");
+        let column = dataset.column("children").expect("children column");
+        let Column::I64(counts) = column.as_ref() else {
+            panic!("children column should be i64");
+        };
+        // Node order is preserved: root has 2 children, `a` has 1, the rest leaf.
+        assert_eq!(counts.values, vec![2, 1, 0, 0]);
     }
 }
